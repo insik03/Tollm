@@ -1,0 +1,32 @@
+spring:
+  datasource:
+    url: jdbc:mysql://localhost:3306/tollm?serverTimezone=Asia/Seoul
+    username: root
+    password: ${DB_PASSWORD:tollmdev}  # 기본값은 docker-compose 로컬 전용. 배포 시 환경변수로 덮어씀
+  jpa:
+    hibernate:
+      ddl-auto: update   # 초기 개발용. 배포 전 validate로 변경
+    properties:
+      hibernate:
+        format_sql: true
+    open-in-view: false
+  data:
+    redis:
+      host: localhost
+      port: 6379
+
+jwt:
+  secret: ${JWT_SECRET:change-me-32bytes-minimum-secret-key!!}
+  expiration-ms: 3600000
+
+tollm:
+  providers:
+    openai:
+      base-url: https://api.openai.com
+      api-key: ${OPENAI_API_KEY:}
+    anthropic:
+      base-url: https://api.anthropic.com
+      api-key: ${ANTHROPIC_API_KEY:}
+  rate-limit:
+    capacity: 10        # 버킷 최대 토큰 수
+    refill-per-sec: 1   # 초당 리필 수

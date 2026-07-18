@@ -1,0 +1,16 @@
+# Gradle
+.gradle/
+build/
+
+# IDE
+.idea/
+*.iml
+out/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# 로그·환경 (시크릿은 환경변수로만 — 작업 규칙 5)
+*.log
+.env
