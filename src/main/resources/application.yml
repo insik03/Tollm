@@ -1,19 +1,12 @@
+# ===== 공통 설정 (모든 환경) =====
+# 환경별로 달라지는 값(DB 접속, ddl-auto 등)은 아래 프로파일 문서(local/prod)에만 둔다.
+# 원칙: 로컬은 "편하게", 운영은 "기본값 없이 fail-fast" - 사람이 기억해야 하는 규칙은
+# 지켜지지 않으므로, 프로파일 구조로 강제한다.
 spring:
-  datasource:
-    url: jdbc:mysql://localhost:3306/tollm?serverTimezone=Asia/Seoul
-    username: root
-    password: ${DB_PASSWORD:tollmdev}  # 기본값은 docker-compose 로컬 전용. 배포 시 환경변수로 덮어씀
+  profiles:
+    active: local   # 명시하지 않으면 로컬. 배포 환경에서는 SPRING_PROFILES_ACTIVE=prod로 덮어씀
   jpa:
-    hibernate:
-      ddl-auto: update   # 초기 개발용. 배포 전 validate로 변경
-    properties:
-      hibernate:
-        format_sql: true
     open-in-view: false
-  data:
-    redis:
-      host: localhost
-      port: 6379
 
 jwt:
   # [보안 수정 SEC-01] 기본값(fallback)을 두지 않는다. JWT_SECRET 환경변수가 없으면 Spring이
@@ -36,6 +29,46 @@ tollm:
     capacity: 10        # 버킷 최대 토큰 수
     refill-per-sec: 1   # 초당 리필 수
   cache:
-    ttl-seconds: 3600   # exact 캐시 TTL (1시간, 근거는 TollmProperties.Cache 주석/docs/progress-week2.md 참고)
+    ttl-seconds: 3600   # exact 캐시 TTL (1시간, 근거는 TollmProperties.Cache 주석 참고)
   proxy:
     max-request-body-bytes: 1048576   # [보안 수정 SEC-02] /v1/** 요청 본문 상한 1MB - 초과 시 413
+
+--- # ===== local: 로컬 개발 전용 (docker-compose 기준) =====
+spring:
+  config:
+    activate:
+      on-profile: local
+  datasource:
+    url: jdbc:mysql://localhost:3306/tollm?serverTimezone=Asia/Seoul
+    username: root                      # 로컬 컨테이너 한정. 운영은 최소 권한 전용 계정 사용
+    password: ${DB_PASSWORD:tollmdev}   # 기본값은 docker-compose.yml과 짝을 이루는 로컬 전용 값
+  jpa:
+    hibernate:
+      ddl-auto: update    # 로컬 한정: 엔티티 변경을 빠르게 반영 (운영은 validate - 아래 prod 참고)
+    properties:
+      hibernate:
+        format_sql: true
+  data:
+    redis:
+      host: localhost
+      port: 6379
+
+--- # ===== prod: 운영 (EC2 배포) - 모든 민감/환경 값은 기본값 없이 환경변수 필수 =====
+# 하나라도 빠지면 부팅이 실패한다(fail-fast). JWT_SECRET(SEC-01)과 같은 원칙을 DB에도 적용.
+spring:
+  config:
+    activate:
+      on-profile: prod
+  datasource:
+    url: ${DB_URL}                # 예: jdbc:mysql://<host>:3306/tollm?serverTimezone=Asia/Seoul
+    username: ${DB_USERNAME}      # root 금지 - tollm 전용 계정에 필요한 권한만 부여
+    password: ${DB_PASSWORD}
+  jpa:
+    hibernate:
+      # validate: 엔티티와 스키마가 다르면 부팅 실패. 운영 DB 스키마는 JPA가 아니라
+      # 사람이 검토한 DDL로만 변경한다 (update는 의도치 않은 스키마 변경/데이터 손실 위험)
+      ddl-auto: validate
+  data:
+    redis:
+      host: ${REDIS_HOST}
+      port: ${REDIS_PORT:6379}

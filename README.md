@@ -46,3 +46,4 @@ com.tollm
 - 왜 비밀번호는 bcrypt인데 API 키는 SHA-256? → 해싱은 입력 엔트로피와 검증 빈도로 결정. 비밀번호는 저엔트로피(사람이 만듦)·저빈도라 느린 bcrypt로 무차별 대입 방어, API 키는 256비트 랜덤(추측 불가)·매 요청 검증이라 빠른 SHA-256 + 결정적 해시 덕분에 유니크 인덱스 단건 조회 가능
 - 왜 OpenAI 호환 API 형식? → 기존 도구/SDK가 base URL만 바꿔 그대로 사용 가능. 프로바이더별 형식 차이는 어댑터(AnthropicClient)가 내부에서 흡수
 - 왜 RestClient 타임아웃 필수? → 외부 LLM API가 응답을 안 주면 톰캣 스레드가 하나씩 물려 스레드 풀 고갈 → 서버 전체 마비. connect 3s / read 60s로 차단
+- 왜 application.yml을 local/prod 프로파일로 분리? → 환경마다 달라야 하는 값(DB 접속, ddl-auto)이 한 파일에 있으면 "배포 전에 바꿔야지"라는 사람의 기억에 의존하게 된다. 프로파일로 분리하면 구조가 강제한다: 로컬은 편의 기본값 + ddl-auto=update, 운영(prod)은 모든 민감 값이 기본값 없는 환경변수(미설정 시 부팅 실패, SEC-01과 같은 fail-fast 원칙) + ddl-auto=validate(운영 스키마는 JPA가 아닌 사람이 검토한 DDL로만 변경)
