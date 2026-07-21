@@ -1,0 +1,15 @@
+# 테스트 전용 설정. Gradle 빌드에서 test 클래스패스가 main 클래스패스보다 우선하므로
+# 같은 상대경로(application.yml)의 이 파일이 src/main/resources/application.yml을 덮어쓴다.
+#
+# [SEC-01 후속 조치] main의 application.yml은 JWT_SECRET에 기본값을 두지 않아(fail-fast)
+# 환경변수가 없으면 컨텍스트 기동이 실패한다. @WebMvcTest 등에서 JwtProvider를 실제로
+# 인스턴스화해야 하는 경우를 대비해 테스트에서만 쓰는 안전한 값(운영에서 재사용 금지)을 둔다.
+# 대부분의 테스트는 JwtProvider 자체를 @MockBean으로 대체하므로 이 값이 실제로 읽히지 않지만,
+# 혹시 실제 빈이 필요한 테스트가 추가되더라도 깨지지 않도록 대비한다.
+jwt:
+  secret: test-only-secret-key-do-not-use-in-production-32bytes+
+  expiration-ms: 3600000
+
+tollm:
+  proxy:
+    max-request-body-bytes: 1048576

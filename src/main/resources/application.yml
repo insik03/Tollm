@@ -16,7 +16,12 @@ spring:
       port: 6379
 
 jwt:
-  secret: ${JWT_SECRET:change-me-32bytes-minimum-secret-key!!}
+  # [보안 수정 SEC-01] 기본값(fallback)을 두지 않는다. JWT_SECRET 환경변수가 없으면 Spring이
+  # 플레이스홀더를 해석하지 못해 기동 자체가 실패한다(fail-fast) - 공개 저장소에 노출된 "잘 알려진
+  # 기본 시크릿"으로 서명된 토큰이 실서비스에서 그대로 신뢰되는 사고를 원천 차단한다.
+  # 로컬 실행 시에는 반드시 환경변수로 주입할 것 (예: JWT_SECRET=... ./gradlew.bat bootRun).
+  # 테스트에서는 src/test/resources/application.yml의 테스트 전용 값으로 덮어써 통과시킨다.
+  secret: ${JWT_SECRET}
   expiration-ms: 3600000
 
 tollm:
@@ -30,3 +35,7 @@ tollm:
   rate-limit:
     capacity: 10        # 버킷 최대 토큰 수
     refill-per-sec: 1   # 초당 리필 수
+  cache:
+    ttl-seconds: 3600   # exact 캐시 TTL (1시간, 근거는 TollmProperties.Cache 주석/docs/progress-week2.md 참고)
+  proxy:
+    max-request-body-bytes: 1048576   # [보안 수정 SEC-02] /v1/** 요청 본문 상한 1MB - 초과 시 413

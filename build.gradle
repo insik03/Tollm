@@ -8,6 +8,19 @@ group = 'com.tollm'
 version = '0.0.1-SNAPSHOT'
 java { toolchain { languageVersion = JavaLanguageVersion.of(21) } }
 
+// [트러블슈팅] 이 프로젝트 경로(OneDrive의 한글 폴더명 "바탕 화면", 공백 포함)에서 테스트를 돌리면
+// 포크된 테스트 JVM이 "ClassNotFoundException: com.tollm.*Test"로 전부 실패했다. 원인 추적 결과:
+// 클래스패스가 길어(Spring Boot 의존성 ~90개) Gradle이 이를 임시 @argfile로 넘기는데, 이 파일을
+// 읽는 JDK 네이티브 런처가 OS 기본 코드페이지(한국어 Windows는 MS949)로 디코딩한다 - Gradle이
+// 파일을 UTF-8로 써도 이 시점엔 -Dfile.encoding/-Dsun.jnu.encoding 같은 JVM 옵션이 아직 적용되기
+// 전이라 소용없다. 그 결과 build/classes/... 아래 있는 "바탕 화면" 세그먼트가 깨진 경로로
+// 잘못 해석되어 그 아래 클래스만 못 찾는다(캐시된 라이브러리 jar는 전부 ASCII 경로라 멀쩡했다).
+// 소스 코드 위치는 그대로 두고(요구사항: 복사/이동 금지), 빌드 "산출물" 위치만 항상 ASCII인
+// 시스템 임시 디렉터리 하위로 옮겨 이 문제를 우회한다 (docs/progress-week2.md 트러블슈팅 참고).
+if (org.gradle.internal.os.OperatingSystem.current().isWindows()) {
+    layout.buildDirectory.set(new File(System.getProperty('java.io.tmpdir'), 'tollm-gradle-build'))
+}
+
 repositories { mavenCentral() }
 
 dependencies {
@@ -26,6 +39,16 @@ dependencies {
     compileOnly 'org.projectlombok:lombok'
     annotationProcessor 'org.projectlombok:lombok'
     testImplementation 'org.springframework.boot:spring-boot-starter-test'
+    // 리포지토리(JPQL) 계층 테스트용 임베디드 DB. 집계 쿼리는 표준 JPQL이라 MySQL 전용 문법에
+    // 기대지 않으므로, 로컬 Docker(MySQL) 없이도 @DataJpaTest가 이 H2로 대체 실행된다
+    // (선택 근거는 docs/progress-week2.md 테스트 전략 참고)
+    testRuntimeOnly 'com.h2database:h2'
 }
 
-tasks.named('test') { useJUnitPlatform() }
+tasks.named('test') {
+    useJUnitPlatform()
+    // gradle.properties의 org.gradle.jvmargs는 Gradle Daemon에만 적용되고, 테스트는 별도로
+    // 포크되는 JVM에서 실행되므로 여기서도 동일하게 인코딩을 UTF-8로 고정해야 한다
+    // (근거는 gradle.properties 주석/docs/progress-week2.md 트러블슈팅 참고)
+    jvmArgs '-Dfile.encoding=UTF-8', '-Dsun.jnu.encoding=UTF-8'
+}
