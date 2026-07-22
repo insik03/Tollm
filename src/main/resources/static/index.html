@@ -1,0 +1,328 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tollm — LLM API 게이트웨이</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --card: #ffffff; --border: #e2e5ea; --text: #1a1d23; --muted: #6b7280;
+    --primary: #2563eb; --primary-dark: #1d4ed8; --danger: #dc2626; --ok: #16a34a; --warn: #d97706;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: -apple-system, "Segoe UI", "Malgun Gothic", sans-serif; background: var(--bg); color: var(--text); }
+  header { background: var(--text); color: #fff; padding: 16px 24px; display: flex; justify-content: space-between; align-items: center; }
+  header h1 { font-size: 18px; margin: 0; }
+  header .tag { font-size: 12px; color: #9ca3af; margin-left: 8px; }
+  #userBar { display: none; align-items: center; gap: 12px; font-size: 13px; }
+  #userBar button { background: transparent; border: 1px solid #4b5563; color: #fff; padding: 4px 10px; border-radius: 6px; cursor: pointer; }
+  main { max-width: 900px; margin: 24px auto; padding: 0 16px; }
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 20px; margin-bottom: 16px; }
+  .card h2 { font-size: 15px; margin: 0 0 14px; display: flex; align-items: center; gap: 8px; }
+  label { display: block; font-size: 12px; color: var(--muted); margin: 10px 0 4px; }
+  input, select, textarea { width: 100%; padding: 8px 10px; border: 1px solid var(--border); border-radius: 6px; font-size: 14px; font-family: inherit; }
+  textarea { resize: vertical; min-height: 60px; }
+  button { cursor: pointer; border: none; border-radius: 6px; padding: 9px 16px; font-size: 13px; font-weight: 600; }
+  .btn-primary { background: var(--primary); color: #fff; }
+  .btn-primary:hover { background: var(--primary-dark); }
+  .btn-outline { background: #fff; border: 1px solid var(--border); color: var(--text); }
+  .btn-danger { background: #fff; border: 1px solid var(--danger); color: var(--danger); font-weight: 500; padding: 4px 10px; font-size: 12px; }
+  .btn-row { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
+  .tabs { display: flex; gap: 4px; margin-bottom: 16px; border-bottom: 1px solid var(--border); }
+  .tab { padding: 10px 14px; font-size: 13px; cursor: pointer; color: var(--muted); border-bottom: 2px solid transparent; }
+  .tab.active { color: var(--primary); border-color: var(--primary); font-weight: 600; }
+  .hidden { display: none !important; }
+  .row { display: flex; gap: 8px; align-items: center; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 8px; }
+  th, td { text-align: left; padding: 7px 8px; border-bottom: 1px solid var(--border); }
+  th { color: var(--muted); font-weight: 500; font-size: 12px; }
+  code, pre { font-family: "Consolas", monospace; font-size: 12px; }
+  pre { background: #f1f2f5; padding: 10px; border-radius: 6px; overflow-x: auto; white-space: pre-wrap; word-break: break-all; }
+  .badge { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 600; }
+  .badge-ok { background: #dcfce7; color: var(--ok); }
+  .badge-off { background: #fee2e2; color: var(--danger); }
+  .badge-status-2 { background: #dcfce7; color: var(--ok); }
+  .badge-status-4 { background: #fef3c7; color: var(--warn); }
+  .badge-status-5 { background: #fee2e2; color: var(--danger); }
+  .stat-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+  .stat { background: #f8fafc; border: 1px solid var(--border); border-radius: 8px; padding: 12px; text-align: center; }
+  .stat .num { font-size: 20px; font-weight: 700; }
+  .stat .label { font-size: 11px; color: var(--muted); margin-top: 2px; }
+  .hint { font-size: 12px; color: var(--muted); margin-top: 8px; line-height: 1.5; }
+  .toast { position: fixed; top: 16px; right: 16px; background: var(--text); color: #fff; padding: 10px 16px; border-radius: 8px; font-size: 13px; opacity: 0; transition: opacity .2s; pointer-events: none; z-index: 100; max-width: 360px; }
+  .toast.show { opacity: 1; }
+  .key-reveal { background: #fffbeb; border: 1px solid #fcd34d; border-radius: 8px; padding: 12px; margin-top: 10px; }
+  .key-reveal code { display: block; word-break: break-all; background: #fff; padding: 8px; border-radius: 4px; margin: 6px 0; }
+</style>
+</head>
+<body>
+
+<header>
+  <div><h1 style="display:inline">Tollm<span class="tag">팀을 위한 LLM API 게이트웨이</span></h1></div>
+  <div id="userBar">
+    <span id="userEmail"></span>
+    <button onclick="logout()">로그아웃</button>
+  </div>
+</header>
+
+<main>
+
+  <!-- 인증 카드 -->
+  <div id="authCard" class="card">
+    <div class="tabs">
+      <div class="tab active" data-tab="login" onclick="switchAuthTab('login')">로그인</div>
+      <div class="tab" data-tab="signup" onclick="switchAuthTab('signup')">회원가입</div>
+    </div>
+    <div id="loginPane">
+      <label>이메일</label><input id="loginEmail" type="email" placeholder="you@example.com">
+      <label>비밀번호</label><input id="loginPassword" type="password">
+      <div class="btn-row"><button class="btn-primary" onclick="login()">로그인</button></div>
+    </div>
+    <div id="signupPane" class="hidden">
+      <label>이메일</label><input id="signupEmail" type="email" placeholder="you@example.com">
+      <label>비밀번호 (8자 이상)</label><input id="signupPassword" type="password">
+      <div class="btn-row"><button class="btn-primary" onclick="signup()">가입하고 로그인</button></div>
+    </div>
+  </div>
+
+  <!-- 로그인 후 화면 -->
+  <div id="appArea" class="hidden">
+
+    <div class="tabs">
+      <div class="tab active" data-panel="keysPanel" onclick="switchPanel('keysPanel')">API 키</div>
+      <div class="tab" data-panel="usagePanel" onclick="switchPanel('usagePanel')">사용량</div>
+      <div class="tab" data-panel="chatPanel" onclick="switchPanel('chatPanel')">채팅 테스트</div>
+      <div class="tab" data-panel="ratePanel" onclick="switchPanel('ratePanel')">레이트리밋 데모</div>
+    </div>
+
+    <!-- 키 관리 -->
+    <div id="keysPanel" class="panel">
+      <div class="card">
+        <h2>API 키 관리</h2>
+        <div class="btn-row"><button class="btn-primary" onclick="issueKey()">새 키 발급</button></div>
+        <div id="keyReveal"></div>
+        <table>
+          <thead><tr><th>Prefix</th><th>상태</th><th>발급일</th><th></th></tr></thead>
+          <tbody id="keysTable"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- 사용량 -->
+    <div id="usagePanel" class="panel hidden">
+      <div class="card">
+        <h2>내 사용량 <button class="btn-outline" style="margin-left:auto;padding:4px 10px;font-size:12px" onclick="loadUsage()">새로고침</button></h2>
+        <div class="stat-grid">
+          <div class="stat"><div class="num" id="statCost">-</div><div class="label">누적 비용 (USD)</div></div>
+          <div class="stat"><div class="num" id="statTokens">-</div><div class="label">누적 토큰</div></div>
+          <div class="stat"><div class="num" id="statRequests">-</div><div class="label">요청 수</div></div>
+          <div class="stat"><div class="num" id="statCacheRate">-</div><div class="label">캐시 히트율</div></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 채팅 테스트 -->
+    <div id="chatPanel" class="panel hidden">
+      <div class="card">
+        <h2>채팅 테스트 (프록시 실호출)</h2>
+        <label>사용할 API 키 (tlm_...) — 위 "API 키" 탭에서 발급 직후 자동 채워짐</label>
+        <input id="chatKey" placeholder="tlm_...">
+        <label>모델</label>
+        <select id="chatModel">
+          <option value="gpt-4o-mini">gpt-4o-mini (OpenAI)</option>
+          <option value="claude-haiku-4-5">claude-haiku-4-5 (Anthropic)</option>
+        </select>
+        <label>메시지</label>
+        <textarea id="chatMessage">1+1은 몇이야?</textarea>
+        <div class="btn-row">
+          <button class="btn-primary" onclick="sendChat(false)">전송</button>
+          <button class="btn-outline" onclick="sendChat(true)">같은 요청 다시 보내기 (캐시 확인)</button>
+        </div>
+        <div class="hint">⚠ 서버에 실제 OPENAI_API_KEY/ANTHROPIC_API_KEY가 설정돼 있어야 정상 응답이 옵니다. 미설정 시 502(PROVIDER_ERROR)가 정상입니다. 두 번째 호출의 응답 시간이 크게 짧으면 exact 캐시 히트입니다.</div>
+        <div id="chatResult"></div>
+      </div>
+    </div>
+
+    <!-- 레이트리밋 데모 -->
+    <div id="ratePanel" class="panel hidden">
+      <div class="card">
+        <h2>레이트리밋 데모 (토큰 버킷)</h2>
+        <label>사용할 API 키 (tlm_...)</label>
+        <input id="rateKey" placeholder="tlm_...">
+        <p class="hint">서버 설정: capacity=10, refillPerSec=1 (10개 버스트 허용 후 초당 1개씩 리필). 11번 연속으로 빠르게 보내면 마지막 요청은 429가 뜨는 것이 정상입니다.</p>
+        <div class="btn-row"><button class="btn-primary" onclick="rateLimitDemo()">11회 연속 전송</button></div>
+        <table>
+          <thead><tr><th>#</th><th>HTTP 상태</th><th>응답 시간</th></tr></thead>
+          <tbody id="rateTable"></tbody>
+        </table>
+      </div>
+    </div>
+
+  </div>
+</main>
+
+<div id="toast" class="toast"></div>
+
+<script>
+const API = '';
+let jwt = sessionStorage.getItem('tollm_jwt');
+let email = sessionStorage.getItem('tollm_email');
+let lastChatBody = null;
+
+function toast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 2500);
+}
+
+function switchAuthTab(tab) {
+  document.querySelectorAll('#authCard .tab').forEach(t => t.classList.toggle('active', t.dataset.tab === tab));
+  document.getElementById('loginPane').classList.toggle('hidden', tab !== 'login');
+  document.getElementById('signupPane').classList.toggle('hidden', tab !== 'signup');
+}
+
+function switchPanel(id) {
+  document.querySelectorAll('#appArea .tab').forEach(t => t.classList.toggle('active', t.dataset.panel === id));
+  document.querySelectorAll('.panel').forEach(p => p.classList.toggle('hidden', p.id !== id));
+  if (id === 'usagePanel') loadUsage();
+  if (id === 'keysPanel') loadKeys();
+}
+
+async function api(path, opts = {}) {
+  const headers = opts.headers || {};
+  if (opts.auth !== false) headers['Authorization'] = 'Bearer ' + (opts.rawKey || jwt);
+  if (opts.body && typeof opts.body !== 'string') { headers['Content-Type'] = 'application/json'; opts.body = JSON.stringify(opts.body); }
+  else if (opts.body) headers['Content-Type'] = 'application/json';
+  const start = performance.now();
+  const res = await fetch(API + path, { method: opts.method || 'GET', headers, body: opts.body });
+  const elapsed = Math.round(performance.now() - start);
+  let data = null;
+  const text = await res.text();
+  try { data = text ? JSON.parse(text) : null; } catch { data = text; }
+  return { status: res.status, ok: res.ok, data, elapsed };
+}
+
+// ---- 인증 ----
+async function signup() {
+  const email = document.getElementById('signupEmail').value;
+  const password = document.getElementById('signupPassword').value;
+  const r = await api('/auth/signup', { method: 'POST', body: { email, password }, auth: false });
+  if (r.status === 201) { toast('가입 완료. 로그인합니다'); await doLogin(email, password); }
+  else toast('가입 실패: ' + (r.data?.message || r.status));
+}
+
+async function login() {
+  await doLogin(document.getElementById('loginEmail').value, document.getElementById('loginPassword').value);
+}
+
+async function doLogin(loginEmail, password) {
+  const r = await api('/auth/login', { method: 'POST', body: { email: loginEmail, password }, auth: false });
+  if (r.status === 200) {
+    jwt = r.data.accessToken; email = loginEmail;
+    sessionStorage.setItem('tollm_jwt', jwt); sessionStorage.setItem('tollm_email', email);
+    enterApp();
+  } else toast('로그인 실패: ' + (r.data?.message || r.status));
+}
+
+function logout() {
+  jwt = null; sessionStorage.clear();
+  document.getElementById('appArea').classList.add('hidden');
+  document.getElementById('authCard').classList.remove('hidden');
+  document.getElementById('userBar').style.display = 'none';
+}
+
+function enterApp() {
+  document.getElementById('authCard').classList.add('hidden');
+  document.getElementById('appArea').classList.remove('hidden');
+  document.getElementById('userBar').style.display = 'flex';
+  document.getElementById('userEmail').textContent = email;
+  loadKeys();
+}
+
+// ---- API 키 ----
+async function issueKey() {
+  const r = await api('/keys', { method: 'POST' });
+  if (r.status === 201) {
+    document.getElementById('keyReveal').innerHTML =
+      `<div class="key-reveal"><b>원문 키 (이 화면에서만 표시됩니다. 지금 복사하세요)</b><code>${r.data.key}</code></div>`;
+    document.getElementById('chatKey').value = r.data.key;
+    document.getElementById('rateKey').value = r.data.key;
+    loadKeys();
+  } else toast('키 발급 실패: ' + r.status);
+}
+
+async function loadKeys() {
+  const r = await api('/keys');
+  if (r.status !== 200) return;
+  document.getElementById('keysTable').innerHTML = r.data.map(k => `
+    <tr>
+      <td><code>${k.prefix}</code></td>
+      <td><span class="badge ${k.status === 'ACTIVE' ? 'badge-ok' : 'badge-off'}">${k.status}</span></td>
+      <td>${(k.createdAt || '').replace('T', ' ').slice(0, 19)}</td>
+      <td>${k.status === 'ACTIVE' ? `<button class="btn-danger" onclick="revokeKey(${k.id})">폐기</button>` : ''}</td>
+    </tr>`).join('') || '<tr><td colspan="4" style="color:#9ca3af">발급된 키가 없습니다</td></tr>';
+}
+
+async function revokeKey(id) {
+  const r = await api('/keys/' + id, { method: 'DELETE' });
+  if (r.status === 204) { toast('키를 폐기했습니다'); loadKeys(); }
+  else toast('폐기 실패: ' + r.status);
+}
+
+// ---- 사용량 ----
+async function loadUsage() {
+  const r = await api('/usage/me');
+  if (r.status !== 200) return;
+  const d = r.data;
+  document.getElementById('statCost').textContent = '$' + Number(d.totalCost || 0).toFixed(4);
+  document.getElementById('statTokens').textContent = d.totalTokens ?? 0;
+  document.getElementById('statRequests').textContent = d.requestCount ?? 0;
+  const rate = d.requestCount ? (100 * d.cacheHitCount / d.requestCount).toFixed(0) : 0;
+  document.getElementById('statCacheRate').textContent = rate + '%';
+}
+
+// ---- 채팅 테스트 ----
+async function sendChat(repeat) {
+  const key = document.getElementById('chatKey').value.trim();
+  if (!key) { toast('API 키를 입력하세요'); return; }
+  const body = repeat && lastChatBody ? lastChatBody : {
+    model: document.getElementById('chatModel').value,
+    messages: [{ role: 'user', content: document.getElementById('chatMessage').value }]
+  };
+  lastChatBody = body;
+  document.getElementById('chatResult').innerHTML = '<p class="hint">요청 중...</p>';
+  const r = await api('/v1/chat/completions', { method: 'POST', body, rawKey: key });
+  const badgeClass = 'badge-status-' + String(r.status)[0];
+  document.getElementById('chatResult').innerHTML = `
+    <p style="margin-top:12px"><span class="badge ${badgeClass}">HTTP ${r.status}</span>
+    <b>${r.elapsed}ms</b> ${r.elapsed < 50 ? '⚡ 매우 빠름 — 캐시 히트 가능성 높음' : ''}</p>
+    <pre>${JSON.stringify(r.data, null, 2)}</pre>`;
+}
+
+// ---- 레이트리밋 데모 ----
+// 토큰 버킷은 "경과 시간만큼 계속 리필"되는 방식이라(token_bucket.lua),
+// 순차로 하나씩 기다리며 보내면 요청 사이 지연 동안 토큰이 다시 채워져 절대 고갈되지 않는다.
+// 반드시 동시에(Promise.all) 쏴야 "capacity개까지만 허용, 나머지는 429"를 재현할 수 있다.
+async function rateLimitDemo() {
+  const key = document.getElementById('rateKey').value.trim();
+  if (!key) { toast('API 키를 입력하세요'); return; }
+  const tbody = document.getElementById('rateTable');
+  tbody.innerHTML = '<tr><td colspan="3" style="color:#9ca3af">11개 요청 동시 전송 중...</td></tr>';
+  const body = { model: 'gpt-4o-mini', messages: [{ role: 'user', content: 'ping' }] };
+  const jobs = Array.from({ length: 11 }, (_, idx) =>
+    api('/v1/chat/completions', { method: 'POST', body, rawKey: key }).then(r => ({ i: idx + 1, r })));
+  const results = await Promise.all(jobs);
+  results.sort((a, b) => a.i - b.i);
+  tbody.innerHTML = results.map(({ i, r }) => {
+    const badgeClass = 'badge-status-' + String(r.status)[0];
+    return `<tr><td>${i}</td><td><span class="badge ${badgeClass}">${r.status}</span></td><td>${r.elapsed}ms</td></tr>`;
+  }).join('');
+}
+
+// ---- 초기화 ----
+if (jwt && email) enterApp();
+</script>
+
+</body>
+</html>
