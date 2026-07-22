@@ -95,4 +95,30 @@ class ResponseCacheServiceTest {
 
         verify(valueOperations).set("cache:key", "response-body", Duration.ofSeconds(3600));
     }
+
+    // ---- 팀 키(add-on) ----
+
+    @Test
+    void 같은_팀_같은_요청은_같은_키를_만든다() throws Exception {
+        JsonNode root = parse("{\"model\":\"gpt-4o-mini\",\"messages\":[{\"role\":\"user\",\"content\":\"hello\"}]}");
+
+        assertThat(cacheService.buildKeyForTeam(1L, root)).isEqualTo(cacheService.buildKeyForTeam(1L, root));
+    }
+
+    @Test
+    void 팀이_다르면_다른_키가_나온다() throws Exception {
+        JsonNode root = parse("{\"model\":\"gpt-4o-mini\",\"messages\":[{\"role\":\"user\",\"content\":\"hello\"}]}");
+
+        assertThat(cacheService.buildKeyForTeam(1L, root)).isNotEqualTo(cacheService.buildKeyForTeam(2L, root));
+    }
+
+    // [설계 의도] 개인 캐시(buildKey)와 팀 캐시(buildKeyForTeam)는 id 값이 같아도(둘 다 1L)
+    // "team:" 접두어로 네임스페이스가 분리되어 있어 절대 같은 키가 나오지 않는다 -
+    // 팀 캐시 도입으로 기존 개인 캐시 항목과 크로스오버가 생기지 않음을 보장하는 핵심 검증
+    @Test
+    void 개인_캐시와_팀_캐시는_같은_id여도_절대_같은_키가_아니다() throws Exception {
+        JsonNode root = parse("{\"model\":\"gpt-4o-mini\",\"messages\":[{\"role\":\"user\",\"content\":\"hello\"}]}");
+
+        assertThat(cacheService.buildKey(1L, root)).isNotEqualTo(cacheService.buildKeyForTeam(1L, root));
+    }
 }

@@ -15,7 +15,9 @@ public class ProxyController {
     // body를 DTO가 아닌 String으로 받는 이유: 프록시는 형식을 해석하지 않고 "통과"가 기본.
     // OpenAI가 필드를 추가해도 우리는 코드 수정 없이 그대로 전달된다
     @PostMapping(value = "/v1/chat/completions", produces = MediaType.APPLICATION_JSON_VALUE)
-    public String chat(@RequestAttribute("userId") Long userId, @RequestBody String body) {
-        return proxyService.relay(userId, body);
+    public String chat(@RequestAttribute("userId") Long userId,
+                       @RequestAttribute(value = "teamId", required = false) Long teamId,
+                       @RequestBody String body) {
+        return proxyService.relay(userId, teamId, body);
     }
 }

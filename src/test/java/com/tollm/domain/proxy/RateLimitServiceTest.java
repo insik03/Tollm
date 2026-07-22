@@ -78,4 +78,27 @@ class RateLimitServiceTest {
 
         assertThat(keysCaptor.getValue()).containsExactly("bucket:42");
     }
+
+    // ---- 팀 키(add-on) ----
+
+    @Test
+    void 팀_버킷도_스크립트_결과를_그대로_boolean으로_옮긴다() {
+        given(redisTemplate.execute(eq(tokenBucketScript), anyList(), any(), any(), any(), any()))
+                .willReturn(1L);
+
+        assertThat(rateLimitService.tryConsumeForTeam(7L)).isTrue();
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void 팀_버킷_키는_개인_버킷과_다른_네임스페이스를_쓴다() {
+        ArgumentCaptor<List<String>> keysCaptor = ArgumentCaptor.forClass(List.class);
+        given(redisTemplate.execute(eq(tokenBucketScript), keysCaptor.capture(), any(), any(), any(), any()))
+                .willReturn(1L);
+
+        rateLimitService.tryConsumeForTeam(42L);
+
+        // 개인 버킷("bucket:42")과 팀 버킷("bucket:team:42")이 같은 숫자 42여도 절대 충돌하지 않는다
+        assertThat(keysCaptor.getValue()).containsExactly("bucket:team:42");
+    }
 }

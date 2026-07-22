@@ -52,6 +52,15 @@
   .toast { position: fixed; top: 16px; right: 16px; background: var(--text); color: #fff; padding: 10px 16px; border-radius: 8px; font-size: 13px; opacity: 0; transition: opacity .2s; pointer-events: none; z-index: 100; max-width: 360px; }
   .toast.show { opacity: 1; }
   .key-reveal { background: #fffbeb; border: 1px solid #fcd34d; border-radius: 8px; padding: 12px; margin-top: 10px; }
+  .chat-bubble { background: #eff4ff; border: 1px solid #dbe4ff; border-radius: 10px; padding: 14px 16px; margin-top: 10px; line-height: 1.65; font-size: 14px; }
+  .chat-bubble p { margin: 0 0 10px; }
+  .chat-bubble p:last-child { margin-bottom: 0; }
+  .chat-bubble code { background: #e2e8f7; padding: 1px 5px; border-radius: 4px; font-size: 12px; }
+  .chat-bubble pre.code-block { background: #1e1e2e; color: #e2e2e8; padding: 10px 12px; border-radius: 6px; overflow-x: auto; margin: 8px 0; white-space: pre; font-size: 12px; }
+  .chat-bubble h3, .chat-bubble h4, .chat-bubble h5 { margin: 12px 0 6px; }
+  .chat-bubble h3:first-child, .chat-bubble h4:first-child, .chat-bubble h5:first-child { margin-top: 0; }
+  .chat-error { background: #fef2f2; border: 1px solid #fecaca; color: var(--danger); border-radius: 8px; padding: 12px 14px; margin-top: 10px; font-size: 13px; }
+  details > summary { cursor: pointer; font-size: 12px; color: var(--muted); margin-top: 10px; }
   .key-reveal code { display: block; word-break: break-all; background: #fff; padding: 8px; border-radius: 4px; margin: 6px 0; }
 </style>
 </head>
@@ -93,6 +102,7 @@
       <div class="tab" data-panel="usagePanel" onclick="switchPanel('usagePanel')">사용량</div>
       <div class="tab" data-panel="chatPanel" onclick="switchPanel('chatPanel')">채팅 테스트</div>
       <div class="tab" data-panel="ratePanel" onclick="switchPanel('ratePanel')">레이트리밋 데모</div>
+      <div class="tab" data-panel="teamPanel" onclick="switchPanel('teamPanel')">팀 API 관리</div>
     </div>
 
     <!-- 키 관리 -->
@@ -158,6 +168,71 @@
       </div>
     </div>
 
+    <!-- 팀 API 관리 (add-on: 개인 키/쿼터/레이트리밋과 완전히 별개 - 원하는 사람만 사용) -->
+    <div id="teamPanel" class="panel hidden">
+      <div class="card">
+        <h2>내 팀</h2>
+        <label>팀 선택</label>
+        <select id="teamSelect" onchange="onTeamSelect()"></select>
+        <p class="hint">여기서 만들거나 초대 링크로 합류한 팀이 나타납니다. 팀 API 키는 개인 키와 별개로 관리되고,
+          쿼터·레이트리밋·캐시도 팀 단위로 독립적입니다(팀원끼리 쿼터/캐시 공유, 개인 사용량에는 영향 없음).</p>
+      </div>
+
+      <div class="card">
+        <h2>새 팀 만들기</h2>
+        <label>팀 이름</label>
+        <input id="newTeamName" placeholder="예: 백엔드 스터디">
+        <label>월 예산 (USD)</label>
+        <input id="newTeamBudget" type="number" step="0.01" value="5">
+        <div class="btn-row"><button class="btn-primary" onclick="createTeam()">팀 생성</button></div>
+      </div>
+
+      <div class="card">
+        <h2>초대 링크로 합류</h2>
+        <label>초대 토큰</label>
+        <input id="joinToken" placeholder="팀 OWNER에게 받은 토큰 붙여넣기">
+        <div class="btn-row"><button class="btn-primary" onclick="joinTeam()">합류</button></div>
+      </div>
+
+      <div id="teamDetail" class="hidden">
+        <div class="card">
+          <h2>초대 링크 발급 (OWNER만 가능)</h2>
+          <div class="btn-row"><button class="btn-outline" onclick="createInvite()">새 초대 링크 생성</button></div>
+          <div id="inviteReveal"></div>
+        </div>
+
+        <div class="card">
+          <h2>팀원 목록</h2>
+          <table>
+            <thead><tr><th>이메일</th><th>역할</th><th>합류일</th></tr></thead>
+            <tbody id="membersTable"></tbody>
+          </table>
+        </div>
+
+        <div class="card">
+          <h2>팀 사용량 <button class="btn-outline" style="margin-left:auto;padding:4px 10px;font-size:12px" onclick="loadTeamUsage()">새로고침</button></h2>
+          <div class="stat-grid">
+            <div class="stat"><div class="num" id="teamStatCost">-</div><div class="label">누적 비용 (USD)</div></div>
+            <div class="stat"><div class="num" id="teamStatTokens">-</div><div class="label">누적 토큰</div></div>
+            <div class="stat"><div class="num" id="teamStatRequests">-</div><div class="label">요청 수</div></div>
+            <div class="stat"><div class="num" id="teamStatCacheRate">-</div><div class="label">캐시 히트율</div></div>
+          </div>
+        </div>
+
+        <div class="card">
+          <h2>팀 API 키</h2>
+          <div class="btn-row"><button class="btn-primary" onclick="issueTeamKey()">새 팀 키 발급</button></div>
+          <div id="teamKeyReveal"></div>
+          <p class="hint">발급된 팀 키(tlm_...)는 "채팅 테스트"·"레이트리밋 데모" 탭에도 그대로 붙여넣어 쓸 수 있습니다 -
+            팀 키는 개인 키와 동일한 방식으로 인증되고, 쿼터/레이트리밋만 팀 단위로 집계됩니다.</p>
+          <table>
+            <thead><tr><th>Prefix</th><th>상태</th><th>발급일</th><th></th></tr></thead>
+            <tbody id="teamKeysTable"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
   </div>
 </main>
 
@@ -168,6 +243,33 @@ const API = '';
 let jwt = sessionStorage.getItem('tollm_jwt');
 let email = sessionStorage.getItem('tollm_email');
 let lastChatBody = null;
+
+// 모델이 생성한 텍스트는 신뢰할 수 없는 입력이다 - innerHTML에 넣기 전 반드시 이스케이프한다.
+function escapeHtml(str) {
+  return String(str).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+// 프레임워크/빌드도구 없이 쓰는 페이지라 마크다운 라이브러리를 CDN에서 끌어오는 대신,
+// Claude/GPT 응답에서 흔한 패턴(코드블록·굵게·제목·문단)만 다루는 최소 변환기를 직접 둔다.
+// 코드블록은 먼저 떼어내 이스케이프해두고 자리표시자로 치환 - 안 그러면 코드 안의 #, * 같은
+// 문자가 마크다운 문법으로 오인식된다.
+function renderMarkdownLite(text) {
+  const codeBlocks = [];
+  let s = text.replace(/```(\w*)\n?([\s\S]*?)```/g, (_, lang, code) => {
+    codeBlocks.push(`<pre class="code-block">${escapeHtml(code.trim())}</pre>`);
+    return ` ${codeBlocks.length - 1} `;
+  });
+  s = escapeHtml(s)
+    .replace(/`([^`]+)`/g, '<code>$1</code>')
+    .replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>')
+    .replace(/^### (.*)$/gm, '<h5>$1</h5>')
+    .replace(/^## (.*)$/gm, '<h4>$1</h4>')
+    .replace(/^# (.*)$/gm, '<h3>$1</h3>')
+    .replace(/\n{2,}/g, '</p><p>')
+    .replace(/\n/g, '<br>');
+  s = `<p>${s}</p>`.replace(/ (\d+) /g, (_, i) => codeBlocks[i]);
+  return s;
+}
 
 function toast(msg) {
   const t = document.getElementById('toast');
@@ -187,6 +289,7 @@ function switchPanel(id) {
   document.querySelectorAll('.panel').forEach(p => p.classList.toggle('hidden', p.id !== id));
   if (id === 'usagePanel') loadUsage();
   if (id === 'keysPanel') loadKeys();
+  if (id === 'teamPanel') loadMyTeams();
 }
 
 async function api(path, opts = {}) {
@@ -293,11 +396,28 @@ async function sendChat(repeat) {
   lastChatBody = body;
   document.getElementById('chatResult').innerHTML = '<p class="hint">요청 중...</p>';
   const r = await api('/v1/chat/completions', { method: 'POST', body, rawKey: key });
+  document.getElementById('chatResult').innerHTML = renderChatResult(r);
+}
+
+// 대화창처럼 답변 텍스트만 보이게 하고, 상태코드/지연시간/토큰수 같은 기술적 정보는
+// 메타 정보 줄 + 접이식 "원본 JSON"으로 분리한다 - 검증할 땐 펼쳐보고, 평소엔 안 보이게.
+function renderChatResult(r) {
   const badgeClass = 'badge-status-' + String(r.status)[0];
-  document.getElementById('chatResult').innerHTML = `
-    <p style="margin-top:12px"><span class="badge ${badgeClass}">HTTP ${r.status}</span>
-    <b>${r.elapsed}ms</b> ${r.elapsed < 50 ? '⚡ 매우 빠름 — 캐시 히트 가능성 높음' : ''}</p>
-    <pre>${JSON.stringify(r.data, null, 2)}</pre>`;
+  const meta = `<p style="margin-top:12px"><span class="badge ${badgeClass}">HTTP ${r.status}</span>
+    <b>${r.elapsed}ms</b> ${r.elapsed < 50 ? '⚡ 매우 빠름 — 캐시 히트 가능성 높음' : ''}</p>`;
+  const rawJson = `<details><summary>원본 JSON 보기</summary><pre>${escapeHtml(JSON.stringify(r.data, null, 2))}</pre></details>`;
+
+  const content = r.data?.choices?.[0]?.message?.content;
+  if (r.ok && content) {
+    const usage = r.data.usage || {};
+    return meta
+      + `<div class="chat-bubble">${renderMarkdownLite(content)}</div>`
+      + `<p class="hint">모델: ${escapeHtml(r.data.model || '-')} · 토큰 ${usage.prompt_tokens ?? '-'} in / ${usage.completion_tokens ?? '-'} out</p>`
+      + rawJson;
+  }
+  // 에러 응답은 {code, message} 형식(GlobalExceptionHandler) - 채팅 형식이 아니므로 별도로 표시
+  const errMsg = r.data?.message || (typeof r.data === 'string' ? r.data : JSON.stringify(r.data));
+  return meta + `<div class="chat-error">${escapeHtml(errMsg)}</div>` + rawJson;
 }
 
 // ---- 레이트리밋 데모 ----
@@ -318,6 +438,121 @@ async function rateLimitDemo() {
     const badgeClass = 'badge-status-' + String(r.status)[0];
     return `<tr><td>${i}</td><td><span class="badge ${badgeClass}">${r.status}</span></td><td>${r.elapsed}ms</td></tr>`;
   }).join('');
+}
+
+// ---- 팀 API 관리 (add-on) ----
+let currentTeamId = null;
+
+async function loadMyTeams() {
+  const r = await api('/teams/mine');
+  if (r.status !== 200) return;
+  const sel = document.getElementById('teamSelect');
+  const keepId = currentTeamId;
+  sel.innerHTML = r.data.map(t => `<option value="${t.teamId}">${escapeHtml(t.name)} (${t.role})</option>`).join('')
+    || '<option value="">아직 소속된 팀이 없습니다</option>';
+  if (r.data.length === 0) { currentTeamId = null; document.getElementById('teamDetail').classList.add('hidden'); return; }
+  const stillExists = keepId && r.data.some(t => t.teamId === keepId);
+  sel.value = stillExists ? keepId : r.data[0].teamId;
+  onTeamSelect();
+}
+
+function onTeamSelect() {
+  const val = document.getElementById('teamSelect').value;
+  currentTeamId = val ? Number(val) : null;
+  document.getElementById('teamDetail').classList.toggle('hidden', !currentTeamId);
+  if (!currentTeamId) return;
+  document.getElementById('inviteReveal').innerHTML = '';
+  document.getElementById('teamKeyReveal').innerHTML = '';
+  loadMembers();
+  loadTeamUsage();
+  loadTeamKeys();
+}
+
+async function createTeam() {
+  const name = document.getElementById('newTeamName').value.trim();
+  const monthlyBudget = document.getElementById('newTeamBudget').value;
+  if (!name) { toast('팀 이름을 입력하세요'); return; }
+  const r = await api('/teams', { method: 'POST', body: { name, monthlyBudget: Number(monthlyBudget) } });
+  if (r.status === 201) {
+    toast('팀을 생성했습니다');
+    document.getElementById('newTeamName').value = '';
+    currentTeamId = r.data.id;
+    await loadMyTeams();
+  } else toast('팀 생성 실패: ' + (r.data?.message || r.status));
+}
+
+async function joinTeam() {
+  const token = document.getElementById('joinToken').value.trim();
+  if (!token) { toast('초대 토큰을 입력하세요'); return; }
+  const r = await api('/teams/join/' + encodeURIComponent(token), { method: 'POST' });
+  if (r.status === 200) {
+    toast(`"${r.data.name}" 팀에 합류했습니다`);
+    document.getElementById('joinToken').value = '';
+    currentTeamId = r.data.id;
+    await loadMyTeams();
+  } else toast('합류 실패: ' + (r.data?.message || r.status));
+}
+
+async function createInvite() {
+  if (!currentTeamId) return;
+  const r = await api(`/teams/${currentTeamId}/invites`, { method: 'POST' });
+  if (r.status === 201) {
+    document.getElementById('inviteReveal').innerHTML =
+      `<div class="key-reveal"><b>초대 토큰 (7일간 유효 - 팀원에게 이 값을 전달하세요)</b><code>${escapeHtml(r.data.token)}</code>
+       <span class="hint">만료: ${(r.data.expiresAt || '').replace('T', ' ').slice(0, 19)}</span></div>`;
+  } else toast('초대 링크 생성 실패: ' + (r.data?.message || r.status)); // OWNER가 아니면 403
+}
+
+async function loadMembers() {
+  const r = await api(`/teams/${currentTeamId}/members`);
+  if (r.status !== 200) return;
+  document.getElementById('membersTable').innerHTML = r.data.map(m => `
+    <tr>
+      <td>${escapeHtml(m.email)}</td>
+      <td><span class="badge ${m.role === 'OWNER' ? 'badge-ok' : 'badge-off'}">${m.role}</span></td>
+      <td>${(m.joinedAt || '').replace('T', ' ').slice(0, 19)}</td>
+    </tr>`).join('');
+}
+
+async function loadTeamUsage() {
+  if (!currentTeamId) return;
+  const r = await api(`/teams/${currentTeamId}/usage`);
+  if (r.status !== 200) return;
+  const d = r.data;
+  document.getElementById('teamStatCost').textContent = '$' + Number(d.totalCost || 0).toFixed(4);
+  document.getElementById('teamStatTokens').textContent = d.totalTokens ?? 0;
+  document.getElementById('teamStatRequests').textContent = d.requestCount ?? 0;
+  const rate = d.requestCount ? (100 * d.cacheHitCount / d.requestCount).toFixed(0) : 0;
+  document.getElementById('teamStatCacheRate').textContent = rate + '%';
+}
+
+async function issueTeamKey() {
+  const r = await api(`/teams/${currentTeamId}/keys`, { method: 'POST' });
+  if (r.status === 201) {
+    document.getElementById('teamKeyReveal').innerHTML =
+      `<div class="key-reveal"><b>팀 키 원문 (이 화면에서만 표시됩니다. 지금 복사하세요)</b><code>${escapeHtml(r.data.key)}</code></div>`;
+    document.getElementById('chatKey').value = r.data.key;
+    document.getElementById('rateKey').value = r.data.key;
+    loadTeamKeys();
+  } else toast('팀 키 발급 실패: ' + (r.data?.message || r.status));
+}
+
+async function loadTeamKeys() {
+  const r = await api(`/teams/${currentTeamId}/keys`);
+  if (r.status !== 200) return;
+  document.getElementById('teamKeysTable').innerHTML = r.data.map(k => `
+    <tr>
+      <td><code>${k.prefix}</code></td>
+      <td><span class="badge ${k.status === 'ACTIVE' ? 'badge-ok' : 'badge-off'}">${k.status}</span></td>
+      <td>${(k.createdAt || '').replace('T', ' ').slice(0, 19)}</td>
+      <td>${k.status === 'ACTIVE' ? `<button class="btn-danger" onclick="revokeTeamKeyUi(${k.id})">폐기</button>` : ''}</td>
+    </tr>`).join('') || '<tr><td colspan="4" style="color:#9ca3af">발급된 팀 키가 없습니다</td></tr>';
+}
+
+async function revokeTeamKeyUi(keyId) {
+  const r = await api(`/teams/${currentTeamId}/keys/${keyId}`, { method: 'DELETE' });
+  if (r.status === 204) { toast('팀 키를 폐기했습니다'); loadTeamKeys(); }
+  else toast('폐기 실패: ' + (r.data?.message || r.status));
 }
 
 // ---- 초기화 ----

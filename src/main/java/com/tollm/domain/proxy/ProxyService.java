@@ -6,6 +6,10 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.tollm.domain.provider.LlmModel;
 import com.tollm.domain.provider.LlmModelRepository;
 import com.tollm.domain.proxy.client.LlmClient;
+import com.tollm.domain.team.Team;
+import com.tollm.domain.team.TeamRepository;
+import com.tollm.domain.team.TeamUsageQuota;
+import com.tollm.domain.team.TeamUsageQuotaRepository;
 import com.tollm.domain.usage.RequestLog;
 import com.tollm.domain.usage.RequestLogRepository;
 import com.tollm.domain.usage.UsageQuota;
@@ -34,6 +38,9 @@ public class ProxyService {
     private final RequestLogRepository requestLogRepository;
     private final LlmModelRepository llmModelRepository;
     private final UserRepository userRepository;
+    // 팀 키(add-on) 전용 - 개인 경로(teamId == null)는 위 8개 협력 객체만으로 기존과 완전히 동일하게 동작한다
+    private final TeamUsageQuotaRepository teamUsageQuotaRepository;
+    private final TeamRepository teamRepository;
 
     // 흐름 (README 플로우차트 + SEC-03 보안 수정 반영):
     // 1. rateLimitService.tryConsume - 실패 시 429
@@ -50,14 +57,32 @@ public class ProxyService {
     // "외부 API가 느려서 우리 DB 커넥션 풀까지 고갈되는" 상황이 생길 수 있다(1주차 RestClient
     // 타임아웃 결정과 같은 맥락의 문제). 그래서 쿼터 조회/리셋, 로그 저장, 쿼터 누적을 각각
     // 리포지토리 메서드 단위의 짧은 자체 트랜잭션으로 나눠 처리한다.
+
+    // 기존 호출부(1주차~2주차 코드, ProxyServiceTest 대부분) 무변경 - 개인 키 경로 그대로 위임
     public String relay(Long userId, String body) {
-        if (!rateLimitService.tryConsume(userId)) {
+        return relay(userId, null, body);
+    }
+
+    // 팀 키(add-on) 지원 버전. teamId == null이면 아래 모든 분기가 기존 개인 키 동작과 100% 동일하다 -
+    // "재설계"가 아니라 팀 키일 때만 타는 병렬 경로를 얹은 것 (README/보고서 설계 근거 참고)
+    public String relay(Long userId, Long teamId, String body) {
+        boolean isTeam = teamId != null;
+
+        boolean allowed = isTeam ? rateLimitService.tryConsumeForTeam(teamId) : rateLimitService.tryConsume(userId);
+        if (!allowed) {
             throw ApiException.tooManyRequests("요청이 너무 많습니다. 잠시 후 다시 시도하세요");
         }
 
-        UsageQuota quota = loadQuota(userId);
-        if (quota.isExceeded()) {
-            throw ApiException.tooManyRequests("이번 달 사용 한도를 초과했습니다");
+        if (isTeam) {
+            TeamUsageQuota quota = loadTeamQuota(teamId);
+            if (quota.isExceeded()) {
+                throw ApiException.tooManyRequests("이번 달 팀 사용 한도를 초과했습니다");
+            }
+        } else {
+            UsageQuota quota = loadQuota(userId);
+            if (quota.isExceeded()) {
+                throw ApiException.tooManyRequests("이번 달 사용 한도를 초과했습니다");
+            }
         }
 
         JsonNode root = parseBody(body);
@@ -73,10 +98,11 @@ public class ProxyService {
                 .orElseThrow(() -> ApiException.badRequest("단가 정보가 없는 모델입니다: " + model));
         LlmClient client = providerRouter.route(model);
 
-        String cacheKey = responseCacheService.buildKey(userId, root);
+        // 팀원끼리는 캐시를 공유한다(팀 단위 buildKeyForTeam) - 개인 키는 기존과 동일하게 본인만 히트
+        String cacheKey = isTeam ? responseCacheService.buildKeyForTeam(teamId, root) : responseCacheService.buildKey(userId, root);
         String cached = responseCacheService.get(cacheKey);
         if (cached != null) {
-            saveLog(userId, model, client.providerName(), 0, 0, BigDecimal.ZERO, true, 0L);
+            saveLog(userId, teamId, model, client.providerName(), 0, 0, BigDecimal.ZERO, true, 0L);
             return cached;
         }
 
@@ -89,8 +115,12 @@ public class ProxyService {
         int outputTokens = tokens[1];
         BigDecimal cost = calculateCost(llmModel, inputTokens, outputTokens);
 
-        saveLog(userId, model, client.providerName(), inputTokens, outputTokens, cost, false, latencyMs);
-        usageQuotaRepository.addUsage(userId, cost);
+        saveLog(userId, teamId, model, client.providerName(), inputTokens, outputTokens, cost, false, latencyMs);
+        if (isTeam) {
+            teamUsageQuotaRepository.addUsage(teamId, cost);
+        } else {
+            usageQuotaRepository.addUsage(userId, cost);
+        }
 
         responseCacheService.put(cacheKey, response);
         return response;
@@ -105,6 +135,17 @@ public class ProxyService {
         if (quota.isResetDue()) {
             quota.reset();
             usageQuotaRepository.save(quota);
+        }
+        return quota;
+    }
+
+    // loadQuota()와 완전히 같은 지연 리셋 로직을 팀 쿼터에도 그대로 적용
+    private TeamUsageQuota loadTeamQuota(Long teamId) {
+        TeamUsageQuota quota = teamUsageQuotaRepository.findByTeamId(teamId)
+                .orElseThrow(() -> ApiException.notFound("팀 사용량 정보를 찾을 수 없습니다"));
+        if (quota.isResetDue()) {
+            quota.reset();
+            teamUsageQuotaRepository.save(quota);
         }
         return quota;
     }
@@ -153,11 +194,13 @@ public class ProxyService {
                 .divide(PER_MILLION, 8, RoundingMode.HALF_UP);
     }
 
-    private void saveLog(Long userId, String model, String providerName,
+    private void saveLog(Long userId, Long teamId, String model, String providerName,
                           int inputTokens, int outputTokens, BigDecimal cost,
                           boolean cacheHit, long latencyMs) {
+        Team team = teamId != null ? teamRepository.getReferenceById(teamId) : null; // FK만 필요 - 불필요한 SELECT 방지
         requestLogRepository.save(RequestLog.builder()
-                .user(userRepository.getReferenceById(userId)) // FK만 필요 - 프록시 참조로 불필요한 SELECT 방지
+                .user(userRepository.getReferenceById(userId)) // 팀 키여도 "발급한 사람"으로 계속 채워짐 (RequestLog 주석 참고)
+                .team(team)
                 .model(model)
                 .providerName(providerName)
                 .inputTokens(inputTokens)

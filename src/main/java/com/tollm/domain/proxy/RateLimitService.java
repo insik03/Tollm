@@ -23,8 +23,17 @@ public class RateLimitService {
     // 이 메서드는 boolean만 반환하고 429로의 변환은 호출부(ProxyService)의 책임으로 남긴다:
     // "토큰이 있는지 없는지"와 "그래서 어떤 HTTP 상태코드/메시지를 줄지"는 서로 다른 관심사다.
     public boolean tryConsume(Long userId) {
+        return consume("bucket:" + userId);
+    }
+
+    // 팀 키 요청 전용 (add-on) - 버킷 키를 "bucket:team:{id}"로 분리해서 개인 버킷("bucket:{userId}")과
+    // 절대 충돌하지 않는다. 이 메서드가 추가되기 전 tryConsume(Long)의 키 형식/동작은 한 글자도 바뀌지 않았다.
+    public boolean tryConsumeForTeam(Long teamId) {
+        return consume("bucket:team:" + teamId);
+    }
+
+    private boolean consume(String key) {
         TollmProperties.RateLimit rateLimit = properties.getRateLimit();
-        String key = "bucket:" + userId;
 
         Long allowed = redisTemplate.execute(
                 tokenBucketScript,

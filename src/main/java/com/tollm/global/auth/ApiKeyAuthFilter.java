@@ -43,7 +43,11 @@ public class ApiKeyAuthFilter extends OncePerRequestFilter {
 
         apiKeyRepository.findByKeyHashAndStatus(keyHash, ApiKey.Status.ACTIVE)
                 .ifPresentOrElse(
-                        key -> request.setAttribute("userId", key.getUser().getId()),
+                        key -> {
+                            request.setAttribute("userId", key.getUser().getId());
+                            // 팀 키일 때만 채워짐(add-on) - 개인 키는 기존과 동일하게 null
+                            request.setAttribute("teamId", key.isTeamKey() ? key.getTeam().getId() : null);
+                        },
                         () -> request.setAttribute("userId", null)
                 );
 

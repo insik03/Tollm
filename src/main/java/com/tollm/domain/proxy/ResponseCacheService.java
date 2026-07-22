@@ -35,6 +35,17 @@ public class ResponseCacheService {
     // 캐시 히트율이 다소 낮아지더라도 사용자 간 응답 크로스오버 가능성을 원천 차단하는 쪽을 기본값으로 택했다.
     // (Team 기능[확장] 도입 시 "팀 단위 공유 캐시"로 범위를 넓히는 것은 그때 별도 검토)
     public String buildKey(Long userId, JsonNode root) {
+        return buildKeyInternal(String.valueOf(userId), root);
+    }
+
+    // 팀 키 요청 전용 (add-on) - "team:{id}"로 구분해서 개인 캐시 항목과 절대 안 섞인다.
+    // 팀원끼리는 캐시를 공유하는 게 자연스럽다는 판단(같은 팀이 같은 질문을 반복하면 캐시 재사용 이득) -
+    // 근거는 이 파일 buildKey() 주석의 "Team 기능 도입 시 별도 검토" 항목을 실제로 적용한 것.
+    public String buildKeyForTeam(Long teamId, JsonNode root) {
+        return buildKeyInternal("team:" + teamId, root);
+    }
+
+    private String buildKeyInternal(String principal, JsonNode root) {
         String model = root.path("model").asText("");
 
         StringBuilder messagesPart = new StringBuilder();
@@ -44,7 +55,7 @@ public class ResponseCacheService {
             messagesPart.append(role).append(':').append(content).append(SEP);
         }
 
-        String raw = userId + SEP + model + SEP + messagesPart;
+        String raw = principal + SEP + model + SEP + messagesPart;
         return KEY_PREFIX + HashUtils.sha256(raw);
     }
 

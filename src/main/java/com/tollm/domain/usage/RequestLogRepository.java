@@ -1,6 +1,7 @@
 package com.tollm.domain.usage;
 
 import com.tollm.domain.usage.dto.AdminUsageSummaryResponse;
+import com.tollm.domain.usage.dto.TeamUsageSummaryResponse;
 import com.tollm.domain.usage.dto.UsageSummaryResponse;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -48,4 +49,20 @@ public interface RequestLogRepository extends JpaRepository<RequestLog, Long> {
             """)
     AdminUsageSummaryResponse aggregateAll(@Param("from") LocalDateTime from,
                                             @Param("to") LocalDateTime to);
+
+    // /teams/{id}/usage - aggregateByUser와 완전히 같은 구조, l.team.id로만 필터한다.
+    // 팀 키가 아닌 개인 키 요청(team이 null인 행)은 여기 절대 안 잡힌다 - 팀/개인 집계가 서로 섞이지 않는다.
+    @Query("""
+            SELECT new com.tollm.domain.usage.dto.TeamUsageSummaryResponse(
+                COALESCE(SUM(l.cost), 0),
+                COALESCE(SUM(l.inputTokens + l.outputTokens), 0),
+                COUNT(l),
+                COALESCE(SUM(CASE WHEN l.cacheHit = true THEN 1L ELSE 0L END), 0)
+            )
+            FROM RequestLog l
+            WHERE l.team.id = :teamId AND l.createdAt BETWEEN :from AND :to
+            """)
+    TeamUsageSummaryResponse aggregateByTeam(@Param("teamId") Long teamId,
+                                              @Param("from") LocalDateTime from,
+                                              @Param("to") LocalDateTime to);
 }

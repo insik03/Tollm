@@ -14,12 +14,11 @@ public class Team {
     @Column(nullable = false)
     private String name;
 
-    // 팀 전체 월 예산 (원 단위). 팀원 개인 쿼터와 별도로 체크
-    private Long monthlyBudget;
-
+    // 월 예산은 이 필드가 아니라 TeamUsageQuota(개인 UsageQuota와 동일 패턴)로 관리한다 -
+    // 팀 생성 시 TeamService가 함께 만든다 (AuthService가 가입 시 UsageQuota를 만드는 것과 동일한 이유:
+    // 원자성이 필요한 두 저장을 한 트랜잭션으로 묶기 위함)
     @Builder
-    public Team(String name, Long monthlyBudget) {
+    public Team(String name) {
         this.name = name;
-        this.monthlyBudget = monthlyBudget;
     }
 }

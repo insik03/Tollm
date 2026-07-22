@@ -1,5 +1,6 @@
 package com.tollm.domain.usage;
 
+import com.tollm.domain.team.Team;
 import com.tollm.domain.user.User;
 import jakarta.persistence.*;
 import lombok.*;
@@ -9,7 +10,8 @@ import java.time.LocalDateTime;
 // 요청마다 1행씩 쌓이는 대용량 테이블 -> 인덱스 설계가 성능 학습 포인트
 @Entity
 @Table(indexes = {
-    @Index(name = "idx_log_user_created", columnList = "user_id, createdAt")
+    @Index(name = "idx_log_user_created", columnList = "user_id, createdAt"),
+    @Index(name = "idx_log_team_created", columnList = "team_id, createdAt")
 })
 @Getter
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
@@ -18,9 +20,16 @@ public class RequestLog {
     @Id @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
+    // 팀 키로 온 요청이어도 이 필드는 "키를 발급한 사람"으로 계속 채워진다(FK 무결성 유지,
+    // 개인 요청과 완전히 같은 컬럼 구조). 팀 단위 집계는 team이 채워진 행만 따로 걸러서 한다.
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "user_id", nullable = false)
     private User user;
+
+    // 팀 키로 온 요청일 때만 채워짐 (ApiKey.team과 동일한 설계 원칙)
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "team_id")
+    private Team team;
 
     private String model;
     private String providerName;
@@ -38,10 +47,11 @@ public class RequestLog {
     private LocalDateTime createdAt;
 
     @Builder
-    public RequestLog(User user, String model, String providerName,
+    public RequestLog(User user, Team team, String model, String providerName,
                       Integer inputTokens, Integer outputTokens, BigDecimal cost,
                       Long latencyMs, Integer statusCode, boolean cacheHit) {
         this.user = user;
+        this.team = team;
         this.model = model;
         this.providerName = providerName;
         this.inputTokens = inputTokens;
