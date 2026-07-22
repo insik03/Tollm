@@ -1,5 +1,9 @@
 package com.tollm.domain.usage;
 
+import com.tollm.domain.apikey.ApiKey;
+import com.tollm.domain.apikey.ApiKeyRepository;
+import com.tollm.domain.team.Team;
+import com.tollm.domain.team.TeamRepository;
 import com.tollm.domain.usage.dto.AdminUsageSummaryResponse;
 import com.tollm.domain.usage.dto.UsageSummaryResponse;
 import com.tollm.domain.user.Role;
@@ -24,6 +28,12 @@ class RequestLogRepositoryTest {
 
     @Autowired
     private UserRepository userRepository;
+
+    @Autowired
+    private TeamRepository teamRepository;
+
+    @Autowired
+    private ApiKeyRepository apiKeyRepository;
 
     private User saveUser(String email) {
         return userRepository.save(User.builder().email(email).password("hash").role(Role.MEMBER).build());
@@ -90,6 +100,52 @@ class RequestLogRepositoryTest {
 
         assertThat(summary.requestCount()).isEqualTo(1L);
         assertThat(summary.totalCost()).isEqualByComparingTo(BigDecimal.ONE);
+    }
+
+    // [버그 회귀] 팀 키로 쓴 사용량이 그 사람의 개인 /usage/me에 새던 문제를 잡는 테스트.
+    // RequestLog.user는 팀 키 요청에서도 "발급한 사람"으로 채워지므로, l.team IS NULL 조건이
+    // 없으면 이 테스트는 requestCount=2로 실패한다(팀 로그까지 합산됨) - 실사용 중 발견된 버그.
+    @Test
+    void 팀_키_사용량은_본인의_개인_집계에_섞이지_않는다() {
+        User user = saveUser("leak-check@test.com");
+        RequestLog personalLog = log(user, 10, 10, BigDecimal.ONE, false); // team 없음
+        requestLogRepository.save(personalLog);
+
+        Team team = teamRepository.save(Team.builder().name("팀").build());
+        RequestLog teamLog = RequestLog.builder()
+                .user(user).team(team).model("gpt-4o-mini").providerName("openai")
+                .inputTokens(999).outputTokens(999).cost(BigDecimal.valueOf(99))
+                .latencyMs(100L).statusCode(200).cacheHit(false).build();
+        requestLogRepository.save(teamLog);
+
+        UsageSummaryResponse summary = requestLogRepository.aggregateByUser(
+                user.getId(), LocalDateTime.now().minusDays(1), LocalDateTime.now().plusDays(1));
+
+        assertThat(summary.requestCount()).isEqualTo(1L); // 개인 로그 1건만 - 팀 로그(2번째)는 제외
+        assertThat(summary.totalCost()).isEqualByComparingTo(BigDecimal.ONE);
+    }
+
+    @Test
+    void 키_단위_집계는_같은_사용자의_다른_키_로그와_섞이지_않는다() {
+        User user = saveUser("multikey@test.com");
+        ApiKey keyA = apiKeyRepository.save(ApiKey.builder().user(user).keyHash("hashA").prefix("tlm_aaaa").build());
+        ApiKey keyB = apiKeyRepository.save(ApiKey.builder().user(user).keyHash("hashB").prefix("tlm_bbbb").build());
+
+        requestLogRepository.save(RequestLog.builder()
+                .user(user).apiKey(keyA).model("gpt-4o-mini").providerName("openai")
+                .inputTokens(10).outputTokens(10).cost(BigDecimal.ONE)
+                .latencyMs(100L).statusCode(200).cacheHit(false).build());
+        requestLogRepository.save(RequestLog.builder()
+                .user(user).apiKey(keyB).model("gpt-4o-mini").providerName("openai")
+                .inputTokens(50).outputTokens(50).cost(BigDecimal.TEN)
+                .latencyMs(100L).statusCode(200).cacheHit(false).build());
+
+        UsageSummaryResponse summaryA = requestLogRepository.aggregateByApiKey(
+                keyA.getId(), LocalDateTime.now().minusDays(1), LocalDateTime.now().plusDays(1));
+
+        assertThat(summaryA.requestCount()).isEqualTo(1L);
+        assertThat(summaryA.totalCost()).isEqualByComparingTo(BigDecimal.ONE);
+        assertThat(summaryA.totalTokens()).isEqualTo(20L);
     }
 
     @Test

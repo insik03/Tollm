@@ -5,6 +5,7 @@ import com.tollm.domain.apikey.dto.ApiKeyIssueResponse;
 import com.tollm.domain.apikey.dto.ApiKeySummary;
 import com.tollm.domain.team.dto.*;
 import com.tollm.domain.usage.dto.TeamUsageSummaryResponse;
+import com.tollm.domain.usage.dto.UsageSummaryResponse;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.format.annotation.DateTimeFormat;
@@ -84,5 +85,15 @@ public class TeamController {
     public void revokeTeamKey(@RequestAttribute("userId") Long userId,
                               @PathVariable Long teamId, @PathVariable Long keyId) {
         apiKeyService.revokeTeamKey(userId, teamId, keyId);
+    }
+
+    // 팀 키 "하나"의 사용량 - /teams/{id}/usage(팀 전체 합산)와 별개로, 여러 팀 키 중
+    // 어느 키가 얼마나 썼는지 구분해서 보고 싶다는 요구로 추가
+    @GetMapping("/{teamId}/keys/{keyId}/usage")
+    public UsageSummaryResponse teamKeyUsage(
+            @RequestAttribute("userId") Long userId, @PathVariable Long teamId, @PathVariable Long keyId,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime from,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime to) {
+        return apiKeyService.teamKeyUsage(userId, teamId, keyId, from, to);
     }
 }

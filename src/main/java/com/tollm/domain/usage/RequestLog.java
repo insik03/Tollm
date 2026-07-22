@@ -1,5 +1,6 @@
 package com.tollm.domain.usage;
 
+import com.tollm.domain.apikey.ApiKey;
 import com.tollm.domain.team.Team;
 import com.tollm.domain.user.User;
 import jakarta.persistence.*;
@@ -11,7 +12,8 @@ import java.time.LocalDateTime;
 @Entity
 @Table(indexes = {
     @Index(name = "idx_log_user_created", columnList = "user_id, createdAt"),
-    @Index(name = "idx_log_team_created", columnList = "team_id, createdAt")
+    @Index(name = "idx_log_team_created", columnList = "team_id, createdAt"),
+    @Index(name = "idx_log_apikey_created", columnList = "api_key_id, createdAt")
 })
 @Getter
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
@@ -31,6 +33,14 @@ public class RequestLog {
     @JoinColumn(name = "team_id")
     private Team team;
 
+    // 이 요청이 어떤 API 키로 왔는지. 프록시 요청은 항상 인증된 키가 있어야 도달하므로 실질적으로는
+    // 거의 항상 채워지지만, "요청 1건 = 반드시 특정 키 1개"라는 전제를 스키마 제약(NOT NULL)으로
+    // 강제하지는 않는다 - team/apiKey 둘 다 같은 add-on 원칙(선택적 참조 추가, 기존 컬럼 무변경)을 따른다.
+    // 이 필드 덕분에 "사용자당 합산"이 아니라 "키 하나당 얼마나 썼는지"를 구분할 수 있다.
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "api_key_id")
+    private ApiKey apiKey;
+
     private String model;
     private String providerName;
     private Integer inputTokens;
@@ -47,11 +57,12 @@ public class RequestLog {
     private LocalDateTime createdAt;
 
     @Builder
-    public RequestLog(User user, Team team, String model, String providerName,
+    public RequestLog(User user, Team team, ApiKey apiKey, String model, String providerName,
                       Integer inputTokens, Integer outputTokens, BigDecimal cost,
                       Long latencyMs, Integer statusCode, boolean cacheHit) {
         this.user = user;
         this.team = team;
+        this.apiKey = apiKey;
         this.model = model;
         this.providerName = providerName;
         this.inputTokens = inputTokens;

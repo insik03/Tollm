@@ -3,6 +3,8 @@ package com.tollm.domain.proxy;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.tollm.domain.apikey.ApiKey;
+import com.tollm.domain.apikey.ApiKeyRepository;
 import com.tollm.domain.provider.LlmModel;
 import com.tollm.domain.provider.LlmModelRepository;
 import com.tollm.domain.proxy.client.LlmClient;
@@ -41,6 +43,8 @@ public class ProxyService {
     // 팀 키(add-on) 전용 - 개인 경로(teamId == null)는 위 8개 협력 객체만으로 기존과 완전히 동일하게 동작한다
     private final TeamUsageQuotaRepository teamUsageQuotaRepository;
     private final TeamRepository teamRepository;
+    // "요청 1건이 어느 키로 왔는지" 기록용(add-on) - apiKeyId가 null이어도(옛 호출부) 나머지 로직은 그대로 동작한다
+    private final ApiKeyRepository apiKeyRepository;
 
     // 흐름 (README 플로우차트 + SEC-03 보안 수정 반영):
     // 1. rateLimitService.tryConsume - 실패 시 429
@@ -63,9 +67,14 @@ public class ProxyService {
         return relay(userId, null, body);
     }
 
-    // 팀 키(add-on) 지원 버전. teamId == null이면 아래 모든 분기가 기존 개인 키 동작과 100% 동일하다 -
-    // "재설계"가 아니라 팀 키일 때만 타는 병렬 경로를 얹은 것 (README/보고서 설계 근거 참고)
+    // 팀 키(add-on) 테스트 호출부 무변경 - apiKeyId 없이도 그대로 동작(RequestLog.apiKey만 null로 남음)
     public String relay(Long userId, Long teamId, String body) {
+        return relay(userId, teamId, null, body);
+    }
+
+    // API 키별 사용량 구분(add-on) 지원 버전. apiKeyId가 null이면 RequestLog.apiKey만 안 채워질 뿐
+    // 나머지 분기는 100% 동일하다 - "재설계"가 아니라 계속 얇게 얹는 것 (README 설계 근거 참고)
+    public String relay(Long userId, Long teamId, Long apiKeyId, String body) {
         boolean isTeam = teamId != null;
 
         boolean allowed = isTeam ? rateLimitService.tryConsumeForTeam(teamId) : rateLimitService.tryConsume(userId);
@@ -102,7 +111,7 @@ public class ProxyService {
         String cacheKey = isTeam ? responseCacheService.buildKeyForTeam(teamId, root) : responseCacheService.buildKey(userId, root);
         String cached = responseCacheService.get(cacheKey);
         if (cached != null) {
-            saveLog(userId, teamId, model, client.providerName(), 0, 0, BigDecimal.ZERO, true, 0L);
+            saveLog(userId, teamId, apiKeyId, model, client.providerName(), 0, 0, BigDecimal.ZERO, true, 0L);
             return cached;
         }
 
@@ -115,7 +124,7 @@ public class ProxyService {
         int outputTokens = tokens[1];
         BigDecimal cost = calculateCost(llmModel, inputTokens, outputTokens);
 
-        saveLog(userId, teamId, model, client.providerName(), inputTokens, outputTokens, cost, false, latencyMs);
+        saveLog(userId, teamId, apiKeyId, model, client.providerName(), inputTokens, outputTokens, cost, false, latencyMs);
         if (isTeam) {
             teamUsageQuotaRepository.addUsage(teamId, cost);
         } else {
@@ -194,13 +203,15 @@ public class ProxyService {
                 .divide(PER_MILLION, 8, RoundingMode.HALF_UP);
     }
 
-    private void saveLog(Long userId, Long teamId, String model, String providerName,
+    private void saveLog(Long userId, Long teamId, Long apiKeyId, String model, String providerName,
                           int inputTokens, int outputTokens, BigDecimal cost,
                           boolean cacheHit, long latencyMs) {
         Team team = teamId != null ? teamRepository.getReferenceById(teamId) : null; // FK만 필요 - 불필요한 SELECT 방지
+        ApiKey apiKey = apiKeyId != null ? apiKeyRepository.getReferenceById(apiKeyId) : null;
         requestLogRepository.save(RequestLog.builder()
                 .user(userRepository.getReferenceById(userId)) // 팀 키여도 "발급한 사람"으로 계속 채워짐 (RequestLog 주석 참고)
                 .team(team)
+                .apiKey(apiKey)
                 .model(model)
                 .providerName(providerName)
                 .inputTokens(inputTokens)

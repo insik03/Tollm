@@ -17,7 +17,8 @@ public class ProxyController {
     @PostMapping(value = "/v1/chat/completions", produces = MediaType.APPLICATION_JSON_VALUE)
     public String chat(@RequestAttribute("userId") Long userId,
                        @RequestAttribute(value = "teamId", required = false) Long teamId,
+                       @RequestAttribute("apiKeyId") Long apiKeyId,
                        @RequestBody String body) {
-        return proxyService.relay(userId, teamId, body);
+        return proxyService.relay(userId, teamId, apiKeyId, body);
     }
 }

@@ -112,7 +112,7 @@
         <div class="btn-row"><button class="btn-primary" onclick="issueKey()">새 키 발급</button></div>
         <div id="keyReveal"></div>
         <table>
-          <thead><tr><th>Prefix</th><th>상태</th><th>발급일</th><th></th></tr></thead>
+          <thead><tr><th>Prefix</th><th>상태</th><th>발급일</th><th>사용량</th><th></th></tr></thead>
           <tbody id="keysTable"></tbody>
         </table>
       </div>
@@ -121,7 +121,8 @@
     <!-- 사용량 -->
     <div id="usagePanel" class="panel hidden">
       <div class="card">
-        <h2>내 사용량 <button class="btn-outline" style="margin-left:auto;padding:4px 10px;font-size:12px" onclick="loadUsage()">새로고침</button></h2>
+        <h2>내 사용량 (모든 개인 키 합산) <button class="btn-outline" style="margin-left:auto;padding:4px 10px;font-size:12px" onclick="loadUsage()">새로고침</button></h2>
+        <p class="hint">팀 키로 쓴 사용량은 여기 포함되지 않습니다 - "팀 API 관리" 탭에서 따로 확인하세요.</p>
         <div class="stat-grid">
           <div class="stat"><div class="num" id="statCost">-</div><div class="label">누적 비용 (USD)</div></div>
           <div class="stat"><div class="num" id="statTokens">-</div><div class="label">누적 토큰</div></div>
@@ -226,7 +227,7 @@
           <p class="hint">발급된 팀 키(tlm_...)는 "채팅 테스트"·"레이트리밋 데모" 탭에도 그대로 붙여넣어 쓸 수 있습니다 -
             팀 키는 개인 키와 동일한 방식으로 인증되고, 쿼터/레이트리밋만 팀 단위로 집계됩니다.</p>
           <table>
-            <thead><tr><th>Prefix</th><th>상태</th><th>발급일</th><th></th></tr></thead>
+            <thead><tr><th>Prefix</th><th>상태</th><th>발급일</th><th>사용량</th><th></th></tr></thead>
             <tbody id="teamKeysTable"></tbody>
           </table>
         </div>
@@ -363,8 +364,20 @@ async function loadKeys() {
       <td><code>${k.prefix}</code></td>
       <td><span class="badge ${k.status === 'ACTIVE' ? 'badge-ok' : 'badge-off'}">${k.status}</span></td>
       <td>${(k.createdAt || '').replace('T', ' ').slice(0, 19)}</td>
+      <td id="keyUsage-${k.id}"><button class="btn-outline" style="padding:3px 8px;font-size:11px" onclick="showKeyUsage(${k.id})">사용량 보기</button></td>
       <td>${k.status === 'ACTIVE' ? `<button class="btn-danger" onclick="revokeKey(${k.id})">폐기</button>` : ''}</td>
-    </tr>`).join('') || '<tr><td colspan="4" style="color:#9ca3af">발급된 키가 없습니다</td></tr>';
+    </tr>`).join('') || '<tr><td colspan="5" style="color:#9ca3af">발급된 키가 없습니다</td></tr>';
+}
+
+// 이 키 "하나"의 사용량만 따로 조회한다 - /usage/me(전체 합산)와 달리 여러 키를 발급받았을 때
+// 어느 키가 얼마나 썼는지 헷갈리지 않도록, 키 목록에서 바로 개별 확인할 수 있게 했다
+async function showKeyUsage(id) {
+  const cell = document.getElementById('keyUsage-' + id);
+  cell.innerHTML = '<span class="hint">조회 중...</span>';
+  const r = await api('/keys/' + id + '/usage');
+  if (r.status !== 200) { cell.innerHTML = '<span class="hint">조회 실패</span>'; return; }
+  const d = r.data;
+  cell.innerHTML = `<span class="hint">$${Number(d.totalCost || 0).toFixed(4)} · ${d.totalTokens ?? 0} 토큰 · ${d.requestCount ?? 0}건</span>`;
 }
 
 async function revokeKey(id) {
@@ -545,8 +558,18 @@ async function loadTeamKeys() {
       <td><code>${k.prefix}</code></td>
       <td><span class="badge ${k.status === 'ACTIVE' ? 'badge-ok' : 'badge-off'}">${k.status}</span></td>
       <td>${(k.createdAt || '').replace('T', ' ').slice(0, 19)}</td>
+      <td id="teamKeyUsage-${k.id}"><button class="btn-outline" style="padding:3px 8px;font-size:11px" onclick="showTeamKeyUsage(${k.id})">사용량 보기</button></td>
       <td>${k.status === 'ACTIVE' ? `<button class="btn-danger" onclick="revokeTeamKeyUi(${k.id})">폐기</button>` : ''}</td>
-    </tr>`).join('') || '<tr><td colspan="4" style="color:#9ca3af">발급된 팀 키가 없습니다</td></tr>';
+    </tr>`).join('') || '<tr><td colspan="5" style="color:#9ca3af">발급된 팀 키가 없습니다</td></tr>';
+}
+
+async function showTeamKeyUsage(id) {
+  const cell = document.getElementById('teamKeyUsage-' + id);
+  cell.innerHTML = '<span class="hint">조회 중...</span>';
+  const r = await api(`/teams/${currentTeamId}/keys/${id}/usage`);
+  if (r.status !== 200) { cell.innerHTML = '<span class="hint">조회 실패</span>'; return; }
+  const d = r.data;
+  cell.innerHTML = `<span class="hint">${Number(d.totalCost || 0).toFixed(4)} · ${d.totalTokens ?? 0} 토큰 · ${d.requestCount ?? 0}건</span>`;
 }
 
 async function revokeTeamKeyUi(keyId) {

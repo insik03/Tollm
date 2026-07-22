@@ -47,6 +47,9 @@ public class ApiKeyAuthFilter extends OncePerRequestFilter {
                             request.setAttribute("userId", key.getUser().getId());
                             // 팀 키일 때만 채워짐(add-on) - 개인 키는 기존과 동일하게 null
                             request.setAttribute("teamId", key.isTeamKey() ? key.getTeam().getId() : null);
+                            // 어떤 "키"로 왔는지 - 같은 사용자가 키를 여러 개 발급받아도 요청별로
+                            // 어느 키를 썼는지 구분하려면 userId만으론 부족해서 별도로 싣는다
+                            request.setAttribute("apiKeyId", key.getId());
                         },
                         () -> request.setAttribute("userId", null)
                 );

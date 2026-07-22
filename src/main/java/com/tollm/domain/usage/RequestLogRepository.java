@@ -21,6 +21,11 @@ public interface RequestLogRepository extends JpaRepository<RequestLog, Long> {
     // DB에서 SUM/COUNT로 집계한 뒤 record 생성자 프로젝션으로 바로 UsageSummaryResponse를 채운다
     // (대용량 로그 테이블 - N+1/메모리 낭비 방지). 로그가 0건이어도 COUNT는 0을, SUM은 NULL을
     // 반환하므로 COALESCE로 0을 기본값으로 맞춰 컨트롤러 쪽에서 null 처리를 하지 않게 한다.
+    //
+    // [버그 수정] l.team IS NULL 조건이 원래 빠져 있었다 - RequestLog.user는 팀 키 요청에서도
+    // "키를 발급한 사람"으로 계속 채워지므로(RequestLog 주석 참고), 이 조건 없이는 팀원이 쓴
+    // 팀 키 사용량까지 그 사람의 개인 /usage/me에 합산돼 보였다(팀/개인 구분이 안 됨 - 실사용
+    // 중 발견). team이 채워진 행(팀 키 사용)은 여기서 제외하고 /teams/{id}/usage 쪽에서만 집계한다.
     @Query("""
             SELECT new com.tollm.domain.usage.dto.UsageSummaryResponse(
                 COALESCE(SUM(l.cost), 0),
@@ -29,11 +34,27 @@ public interface RequestLogRepository extends JpaRepository<RequestLog, Long> {
                 COALESCE(SUM(CASE WHEN l.cacheHit = true THEN 1L ELSE 0L END), 0)
             )
             FROM RequestLog l
-            WHERE l.user.id = :userId AND l.createdAt BETWEEN :from AND :to
+            WHERE l.user.id = :userId AND l.team IS NULL AND l.createdAt BETWEEN :from AND :to
             """)
     UsageSummaryResponse aggregateByUser(@Param("userId") Long userId,
                                           @Param("from") LocalDateTime from,
                                           @Param("to") LocalDateTime to);
+
+    // API 키 1개 단위 집계 (개인 키든 팀 키든 동일 쿼리) - 사용자가 키를 여러 개 발급받아도
+    // 서로 섞이지 않고 각자 얼마나 썼는지 구분할 수 있다. 소유권/멤버십 검증은 서비스 계층 책임.
+    @Query("""
+            SELECT new com.tollm.domain.usage.dto.UsageSummaryResponse(
+                COALESCE(SUM(l.cost), 0),
+                COALESCE(SUM(l.inputTokens + l.outputTokens), 0),
+                COUNT(l),
+                COALESCE(SUM(CASE WHEN l.cacheHit = true THEN 1L ELSE 0L END), 0)
+            )
+            FROM RequestLog l
+            WHERE l.apiKey.id = :apiKeyId AND l.createdAt BETWEEN :from AND :to
+            """)
+    UsageSummaryResponse aggregateByApiKey(@Param("apiKeyId") Long apiKeyId,
+                                            @Param("from") LocalDateTime from,
+                                            @Param("to") LocalDateTime to);
 
     // /admin/usage - 사용자 구분 없이 전체 합산 + 활동한 사용자 수(COUNT DISTINCT)
     @Query("""

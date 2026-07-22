@@ -5,6 +5,8 @@ import com.tollm.domain.team.Team;
 import com.tollm.domain.team.TeamMember;
 import com.tollm.domain.team.TeamMemberRepository;
 import com.tollm.domain.team.TeamRepository;
+import com.tollm.domain.usage.RequestLogRepository;
+import com.tollm.domain.usage.dto.UsageSummaryResponse;
 import com.tollm.domain.user.Role;
 import com.tollm.domain.user.User;
 import com.tollm.domain.user.UserRepository;
@@ -15,11 +17,13 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import java.math.BigDecimal;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.mock;
 
@@ -33,6 +37,7 @@ class ApiKeyServiceTeamTest {
     @Mock private UserRepository userRepository;
     @Mock private TeamRepository teamRepository;
     @Mock private TeamMemberRepository teamMemberRepository;
+    @Mock private RequestLogRepository requestLogRepository;
 
     private ApiKeyService apiKeyService;
 
@@ -44,7 +49,7 @@ class ApiKeyServiceTeamTest {
 
     @BeforeEach
     void setUp() {
-        apiKeyService = new ApiKeyService(apiKeyRepository, userRepository, teamRepository, teamMemberRepository);
+        apiKeyService = new ApiKeyService(apiKeyRepository, userRepository, teamRepository, teamMemberRepository, requestLogRepository);
     }
 
     private User userWithId(Long id) {
@@ -148,5 +153,61 @@ class ApiKeyServiceTeamTest {
         assertThatThrownBy(() -> apiKeyService.revokeTeamKey(CALLER_ID, TEAM_ID, KEY_ID))
                 .isInstanceOf(ApiException.class)
                 .satisfies(e -> assertThat(((ApiException) e).getStatus().value()).isEqualTo(404));
+    }
+
+    // ---- 키 단위 사용량 (add-on) ----
+
+    @Test
+    void 본인_개인_키_사용량은_조회할_수_있다() {
+        ApiKey key = ApiKey.builder().user(userWithId(CALLER_ID)).keyHash("h").prefix("tlm_abcd").build();
+        UsageSummaryResponse expected = new UsageSummaryResponse(BigDecimal.ONE, 100L, 5L, 1L);
+        given(apiKeyRepository.findById(KEY_ID)).willReturn(Optional.of(key));
+        given(requestLogRepository.aggregateByApiKey(eq(KEY_ID), any(), any())).willReturn(expected);
+
+        UsageSummaryResponse result = apiKeyService.keyUsage(CALLER_ID, KEY_ID, null, null);
+
+        assertThat(result).isEqualTo(expected);
+    }
+
+    @Test
+    void 남의_개인_키_사용량은_조회할_수_없다() {
+        ApiKey key = ApiKey.builder().user(userWithId(OTHER_USER_ID)).keyHash("h").prefix("tlm_abcd").build();
+        given(apiKeyRepository.findById(KEY_ID)).willReturn(Optional.of(key));
+
+        assertThatThrownBy(() -> apiKeyService.keyUsage(CALLER_ID, KEY_ID, null, null))
+                .isInstanceOf(ApiException.class)
+                .satisfies(e -> assertThat(((ApiException) e).getStatus().value()).isEqualTo(403));
+    }
+
+    // [핵심 회귀] 팀 키는 keyUsage()가 아니라 teamKeyUsage()로만 조회해야 한다 -
+    // 개인/팀 사용량 구분을 API 레벨에서도 강제한다
+    @Test
+    void 팀_키는_개인_키_사용량_엔드포인트로_조회할_수_없다() {
+        // isTeamKey()가 ||의 앞 항이라 true면 뒤(key.getUser())는 평가되지 않는다(short-circuit) -
+        // 즉 여기선 user/team의 getId() 값 자체가 안 쓰이므로 stub 없는 mock을 쓴다
+        ApiKey teamKey = ApiKey.builder().user(mock(User.class)).team(mock(Team.class))
+                .keyHash("h").prefix("tlm_abcd").build();
+        given(apiKeyRepository.findById(KEY_ID)).willReturn(Optional.of(teamKey));
+
+        assertThatThrownBy(() -> apiKeyService.keyUsage(CALLER_ID, KEY_ID, null, null))
+                .isInstanceOf(ApiException.class)
+                .satisfies(e -> assertThat(((ApiException) e).getStatus().value()).isEqualTo(403));
+    }
+
+    @Test
+    void 팀_멤버는_팀_키_사용량을_조회할_수_있다() {
+        // teamKeyUsage()는 팀 일치 여부(key.getTeam().getId())만 확인하고 발급자가 누군지는
+        // 안 보므로(누구나 팀 사용량을 볼 수 있음) key.getUser()는 stub 없는 mock으로 충분하다
+        ApiKey key = ApiKey.builder().user(mock(User.class)).team(teamWithId(TEAM_ID))
+                .keyHash("h").prefix("tlm_abcd").build();
+        TeamMember member = memberOf(TeamMember.TeamRole.MEMBER);
+        UsageSummaryResponse expected = new UsageSummaryResponse(BigDecimal.TEN, 200L, 3L, 0L);
+        given(teamMemberRepository.findByTeamIdAndUserId(TEAM_ID, CALLER_ID)).willReturn(Optional.of(member));
+        given(apiKeyRepository.findById(KEY_ID)).willReturn(Optional.of(key));
+        given(requestLogRepository.aggregateByApiKey(eq(KEY_ID), any(), any())).willReturn(expected);
+
+        UsageSummaryResponse result = apiKeyService.teamKeyUsage(CALLER_ID, TEAM_ID, KEY_ID, null, null);
+
+        assertThat(result).isEqualTo(expected);
     }
 }

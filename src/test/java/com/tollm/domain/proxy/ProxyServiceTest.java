@@ -1,6 +1,7 @@
 package com.tollm.domain.proxy;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.tollm.domain.apikey.ApiKeyRepository;
 import com.tollm.domain.provider.LlmModel;
 import com.tollm.domain.provider.LlmModelRepository;
 import com.tollm.domain.provider.Provider;
@@ -50,6 +51,7 @@ class ProxyServiceTest {
     @Mock private LlmClient llmClient;
     @Mock private TeamUsageQuotaRepository teamUsageQuotaRepository;
     @Mock private TeamRepository teamRepository;
+    @Mock private ApiKeyRepository apiKeyRepository;
 
     private ProxyService proxyService;
 
@@ -62,7 +64,7 @@ class ProxyServiceTest {
     void setUp() {
         proxyService = new ProxyService(providerRouter, new ObjectMapper(), rateLimitService,
                 responseCacheService, usageQuotaRepository, requestLogRepository,
-                llmModelRepository, userRepository, teamUsageQuotaRepository, teamRepository);
+                llmModelRepository, userRepository, teamUsageQuotaRepository, teamRepository, apiKeyRepository);
     }
 
     private UsageQuota quotaWithLimit(BigDecimal limit) {

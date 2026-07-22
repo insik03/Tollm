@@ -6,6 +6,8 @@ import com.tollm.domain.team.Team;
 import com.tollm.domain.team.TeamMember;
 import com.tollm.domain.team.TeamMemberRepository;
 import com.tollm.domain.team.TeamRepository;
+import com.tollm.domain.usage.RequestLogRepository;
+import com.tollm.domain.usage.dto.UsageSummaryResponse;
 import com.tollm.domain.user.User;
 import com.tollm.domain.user.UserRepository;
 import com.tollm.global.auth.HashUtils;
@@ -15,6 +17,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.security.SecureRandom;
+import java.time.LocalDateTime;
 import java.util.Base64;
 import java.util.List;
 
@@ -26,6 +29,7 @@ public class ApiKeyService {
     private final UserRepository userRepository;
     private final TeamRepository teamRepository;
     private final TeamMemberRepository teamMemberRepository;
+    private final RequestLogRepository requestLogRepository;
 
     // 일반 Random은 예측 가능해서 보안 용도 금지. SecureRandom은 OS의 암호학적 난수원 사용
     private static final SecureRandom RANDOM = new SecureRandom();
@@ -87,6 +91,43 @@ public class ApiKeyService {
             throw ApiException.forbidden("키를 발급한 본인 또는 팀 OWNER만 폐기할 수 있습니다");
         }
         key.revoke();
+    }
+
+    // ---- 키 단위 사용량 (add-on) ----
+    // "userId/teamId 합산"이 아니라 "이 키 하나로 얼마나 썼는지"를 구분해서 보고 싶다는 요구로 추가.
+    // 같은 사람이 개인 키를 여러 개 발급받아도 서로 안 섞이고, 팀 키 사용은 애초에 별도 team_id가
+    // 찍혀서(RequestLogRepository.aggregateByUser의 team IS NULL 조건) 개인 합산에 새지 않는다 -
+    // 이 메서드는 그 위에서 "키 하나" 단위까지 더 잘게 쪼개 보여준다.
+
+    @Transactional(readOnly = true)
+    public UsageSummaryResponse keyUsage(Long userId, Long keyId, LocalDateTime from, LocalDateTime to) {
+        ApiKey key = apiKeyRepository.findById(keyId)
+                .orElseThrow(() -> ApiException.notFound("키를 찾을 수 없습니다"));
+        if (key.isTeamKey() || !key.getUser().getId().equals(userId)) {
+            throw ApiException.forbidden("본인의 개인 키만 조회할 수 있습니다");
+        }
+        return aggregateKeyUsage(keyId, from, to);
+    }
+
+    @Transactional(readOnly = true)
+    public UsageSummaryResponse teamKeyUsage(Long userId, Long teamId, Long keyId, LocalDateTime from, LocalDateTime to) {
+        requireMember(teamId, userId);
+        ApiKey key = apiKeyRepository.findById(keyId)
+                .orElseThrow(() -> ApiException.notFound("키를 찾을 수 없습니다"));
+        if (key.getTeam() == null || !key.getTeam().getId().equals(teamId)) {
+            throw ApiException.notFound("해당 팀의 키가 아닙니다");
+        }
+        return aggregateKeyUsage(keyId, from, to);
+    }
+
+    // UsageService.myUsage/AdminService.allUsage와 같은 "from/to 기본값 + 역전 검증" 패턴
+    private UsageSummaryResponse aggregateKeyUsage(Long keyId, LocalDateTime from, LocalDateTime to) {
+        LocalDateTime effectiveFrom = from != null ? from : LocalDateTime.now().minusMonths(1);
+        LocalDateTime effectiveTo = to != null ? to : LocalDateTime.now();
+        if (effectiveFrom.isAfter(effectiveTo)) {
+            throw ApiException.badRequest("from은 to보다 이전이어야 합니다");
+        }
+        return requestLogRepository.aggregateByApiKey(keyId, effectiveFrom, effectiveTo);
     }
 
     private ApiKeyIssueResponse issueInternal(User user, Team team) {
