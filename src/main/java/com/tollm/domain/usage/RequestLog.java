@@ -26,6 +26,11 @@ public class RequestLog {
     private String providerName;
     private Integer inputTokens;
     private Integer outputTokens;
+
+    // 기본값(DECIMAL(19,2))으로 두면 LLM 요청 1건당 비용(보통 $0.01 미만, 예: $0.00082)이 0.00으로
+    // 잘려 저장된다 - 표시 문제가 아니라 실제 정보 손실. ProxyService.priceOf()가 소수점 8자리로
+    // 계산하므로(divide(..., 8, HALF_UP)) 컬럼도 scale=8로 맞춘다. 실 API 키로 검증하다가 발견한 문제.
+    @Column(precision = 19, scale = 8)
     private BigDecimal cost;
     private Long latencyMs;
     private Integer statusCode;

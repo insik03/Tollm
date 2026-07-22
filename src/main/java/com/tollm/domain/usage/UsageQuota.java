@@ -18,7 +18,11 @@ public class UsageQuota {
     @JoinColumn(name = "user_id", nullable = false, unique = true)
     private User user;
 
+    // RequestLog.cost와 같은 이유로 scale=8 지정 - 기본 DECIMAL(19,2)이면 addUsage로 누적되는
+    // 소액(건당 $0.01 미만)이 매번 0으로 잘려 쿼터가 사실상 영원히 차지 않는다.
+    @Column(precision = 19, scale = 8)
     private BigDecimal monthlyCostLimit;
+    @Column(precision = 19, scale = 8)
     private BigDecimal currentUsage;
     private LocalDate resetAt;
 
