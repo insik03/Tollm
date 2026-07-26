@@ -46,4 +46,9 @@ public class ApiException extends RuntimeException {
     public static ApiException badGateway(String message) {
         return new ApiException(HttpStatus.BAD_GATEWAY, "PROVIDER_ERROR", message);
     }
+
+    // 동시 외부 호출 격벽(bulkhead) 포화 - 지금은 처리 못 하니 잠시 후 재시도하라는 신호
+    public static ApiException serviceUnavailable(String message) {
+        return new ApiException(HttpStatus.SERVICE_UNAVAILABLE, "SERVICE_UNAVAILABLE", message);
+    }
 }

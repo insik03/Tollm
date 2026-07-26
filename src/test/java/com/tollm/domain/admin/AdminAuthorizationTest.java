@@ -1,6 +1,6 @@
 package com.tollm.domain.admin;
 
-import com.tollm.domain.apikey.ApiKeyRepository;
+import com.tollm.domain.apikey.ApiKeyLookupService;
 import com.tollm.domain.usage.dto.AdminUsageSummaryResponse;
 import com.tollm.global.auth.JwtProvider;
 import com.tollm.global.config.TollmProperties;
@@ -39,7 +39,7 @@ class AdminAuthorizationTest {
     private JwtProvider jwtProvider;
 
     @MockBean
-    private ApiKeyRepository apiKeyRepository;
+    private ApiKeyLookupService apiKeyLookupService;
 
     // RequestSizeLimitFilter(SEC-02)도 이 슬라이스에 함께 올라오므로 의존성을 채워야 한다
     @MockBean

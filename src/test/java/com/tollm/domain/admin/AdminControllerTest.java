@@ -1,6 +1,6 @@
 package com.tollm.domain.admin;
 
-import com.tollm.domain.apikey.ApiKeyRepository;
+import com.tollm.domain.apikey.ApiKeyLookupService;
 import com.tollm.domain.usage.dto.AdminUsageSummaryResponse;
 import com.tollm.global.auth.JwtProvider;
 import com.tollm.global.config.TollmProperties;
@@ -43,7 +43,7 @@ class AdminControllerTest {
     private JwtProvider jwtProvider;
 
     @MockBean
-    private ApiKeyRepository apiKeyRepository;
+    private ApiKeyLookupService apiKeyLookupService;
 
     @MockBean
     private TollmProperties tollmProperties;

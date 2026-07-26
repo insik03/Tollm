@@ -16,6 +16,7 @@ import com.tollm.domain.usage.UsageQuotaRepository;
 import com.tollm.domain.user.Role;
 import com.tollm.domain.user.User;
 import com.tollm.domain.user.UserRepository;
+import com.tollm.global.config.TollmProperties;
 import com.tollm.global.error.ApiException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -64,7 +65,11 @@ class ProxyServiceTest {
     void setUp() {
         proxyService = new ProxyService(providerRouter, new ObjectMapper(), rateLimitService,
                 responseCacheService, usageQuotaRepository, requestLogRepository,
-                llmModelRepository, userRepository, teamUsageQuotaRepository, teamRepository, apiKeyRepository);
+                llmModelRepository, userRepository, teamUsageQuotaRepository, teamRepository, apiKeyRepository,
+                new TollmProperties());
+        // @PostConstruct는 Spring 컨텍스트에서만 자동 실행되므로, 단위 테스트에서는 직접 호출해
+        // 격벽 세마포어(기본 100 permit)를 초기화한다
+        proxyService.initBulkhead();
     }
 
     private UsageQuota quotaWithLimit(BigDecimal limit) {

@@ -8,6 +8,25 @@ spring:
   jpa:
     open-in-view: false
 
+server:
+  tomcat:
+    threads:
+      # 톰캣 워커 스레드 수를 기본값(200)으로 명시해 둔다. 외부 LLM 동시 호출은
+      # tollm.proxy.max-concurrent-upstream(기본 100)으로 별도 제한하므로, LLM이 느려져도
+      # 최소 절반의 스레드는 로그인/대시보드 등 프록시와 무관한 요청용으로 남는다(격벽).
+      max: 200
+
+management:
+  endpoints:
+    web:
+      exposure:
+        # 배포 검증/Nginx·systemd 헬스체크용으로 health만 노출한다. 그 외 actuator 엔드포인트
+        # (env, beans, metrics 등)는 민감정보 노출 위험이 있어 공개하지 않는다.
+        include: health
+  endpoint:
+    health:
+      show-details: never   # 상세(DB/Redis 접속 정보 등)는 숨기고 UP/DOWN만 노출
+
 jwt:
   # [보안 수정 SEC-01] 기본값(fallback)을 두지 않는다. JWT_SECRET 환경변수가 없으면 Spring이
   # 플레이스홀더를 해석하지 못해 기동 자체가 실패한다(fail-fast) - 공개 저장소에 노출된 "잘 알려진
@@ -66,9 +85,20 @@ spring:
   jpa:
     hibernate:
       # validate: 엔티티와 스키마가 다르면 부팅 실패. 운영 DB 스키마는 JPA가 아니라
-      # 사람이 검토한 DDL로만 변경한다 (update는 의도치 않은 스키마 변경/데이터 손실 위험)
+      # 사람이 검토한 DDL로만 변경한다 (db/schema.sql을 배포 전에 선적용 - README 배포 절차 참고)
       ddl-auto: validate
   data:
     redis:
       host: ${REDIS_HOST}
       port: ${REDIS_PORT:6379}
+
+# [운영 fail-fast] 공통 섹션의 프로바이더 키는 ${OPENAI_API_KEY:}처럼 빈 기본값이라, 로컬에서는
+# 키 없이도 부팅되지만 운영에서 키를 빠뜨리면 "부팅은 성공하는데 모든 /v1 요청이 401로 실패하는"
+# 조용한 장애가 난다. 게이트웨이의 핵심 기능이 프록시이므로 사실상 전면 장애다. prod에서는 기본값을
+# 없애(${OPENAI_API_KEY}) 키 누락 시 아예 부팅이 실패하도록 강제한다(JWT_SECRET/DB와 같은 원칙).
+tollm:
+  providers:
+    openai:
+      api-key: ${OPENAI_API_KEY}
+    anthropic:
+      api-key: ${ANTHROPIC_API_KEY}

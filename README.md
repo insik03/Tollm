@@ -54,3 +54,23 @@ com.tollm
 - 초대 링크를 왜 1회용 토큰이 아니라 디스코드식 재사용 링크로 만들었나? → "링크 하나를 여러 팀원에게 공유"하는 게 초대의 자연스러운 사용 방식이다. 만료(7일) 전까지는 여러 번 눌러도 안전하도록(멱등) 이미 멤버면 에러 대신 조용히 통과시켰다 - 재시도가 실패로 보이면 사용자가 혼란스럽다
 - 팀 키 사용량이 개인 집계(`/usage/me`)에 새던 버그를 어떻게 잡았나? → `RequestLog.user`는 팀 키로 보낸 요청에서도 항상 "발급한 사람"으로 채워지므로, `aggregateByUser` 쿼리에 `l.team IS NULL` 조건이 없으면 팀에서 쓴 사용량까지 그 사람의 개인 합계에 합쳐진다. 실제로 팀 기능을 써보다가 개인 사용량 숫자가 팀 사용분만큼 부풀어 있는 걸 보고 발견한 버그다 - "내가 개인 키로 쓴 건지 팀 키로 쓴 건지 구분이 안 된다"는 피드백이 계기였다. 회귀 방지용 테스트(`팀_키_사용량은_본인의_개인_집계에_섞이지_않는다`)를 먼저 추가해 버그를 재현시킨 뒤 조건을 고쳤다
 - 왜 API 키 단위 사용량을 별도로 추가했나(팀 집계와 별개로)? → 같은 사람이 개인 키를 여러 개 발급받으면(또는 여러 팀 키를 쓰면) 기존엔 "그 사람"·"그 팀" 단위로만 합산돼, 어느 키가 얼마나 썼는지 구분할 방법이 없었다. `RequestLog`에 nullable `apiKey` FK 하나만 추가하고(팀 컬럼을 add-on으로 넣었을 때와 같은 이유로, 기존 `user`/`team` 집계 로직은 그대로 둔 채 새 집계 쿼리(`aggregateByApiKey`)만 얹었다) `GET /keys/{id}/usage`, `GET /teams/{id}/keys/{id}/usage`로 노출했다. 기존의 "총합" 뷰(`/usage/me`, `/teams/{id}/usage`)는 "지금까지 쓴 전체 비용이 얼마인지"를 보는 데 여전히 유용하므로 없애지 않고 병행했다 - 세분화된 값과 합산된 값은 서로 다른 질문에 답하므로 대체가 아니라 추가 관계다
+
+### 배포 전 재검수(AI 재검수)에서 잡아 고친 항목
+
+- (SEC-04) URL 인코딩으로 관리자 인증을 우회할 수 있던 문제 → 두 인증 필터(JwtAuthFilter/ApiKeyAuthFilter)가 `request.getRequestURI()`(퍼센트 인코딩 원문)로 보호 경로를 판정했는데, Spring MVC는 **디코딩된** 경로로 컨트롤러를 매핑한다. 그래서 `GET /%61dmin/usage`(`%61`='a')는 필터의 `/admin` 접두어 매칭을 피해 필터를 통째로 건너뛰면서 AdminController에는 그대로 라우팅돼, 토큰 없이 전체 사용량 조회·타 사용자 쿼터 조작이 가능했다. Spring이 매핑에 쓰는 것과 같은 `UrlPathHelper.getPathWithinApplication()`(디코딩·정규화)으로 판정을 바꿔 필터와 컨트롤러가 항상 같은 경로를 보게 했다. 실서버 curl로 `/%61dmin`이 401로 막히는 것 확인
+- (SEC-04) `stream:true`로 월 쿼터를 무제한 우회할 수 있던 문제 → 스트리밍 응답은 SSE 텍스트라 토큰 파서가 못 읽어 비용이 0으로 기록되고, 실제 프로바이더 비용은 발생했는데 쿼터에는 반영되지 않았다(SEC-03과 같은 "과금 미보장 요청 통과" 계열). 스트리밍은 지원 대상이 아니므로 외부 호출 전에 400으로 거부한다
+- 캐시 키를 model+messages 일부가 아니라 **정규화된 요청 본문 전체**로 바꿈 → 예전엔 `content`를 `asText()`로만 읽어 OpenAI 표준 배열 형식(`[{"type":"text",...}]`)의 서로 다른 질문이 같은 키로 충돌하거나(남의 답이 나감), `max_tokens`/`temperature`가 달라도 같은 캐시를 받는(잘린 응답을 받는) 오응답이 있었다. "조금이라도 다른 요청은 다른 키" 원칙으로 바꿔 잘못된 히트를 원천 차단했다(공백만 다른 요청이 미스가 되는 건 "안전한 미스"라 수용)
+- 외부 LLM 호출을 커넥션 풀 있는 `JdkClientHttpRequestFactory`로 교체 + `/v1` 동시 호출 격벽(Semaphore) 도입 → 예전 `SimpleClientHttpRequestFactory`는 풀이 없어 동시 요청이 늘면 매번 TCP+TLS 핸드셰이크를 새로 했고, 블로킹 호출이 톰캣 스레드(기본 200)를 최대 60초씩 물어 프로바이더가 느려지면 로그인·대시보드까지 먹통이 됐다. 동시 외부 호출을 100으로 제한하고 초과분은 즉시 503으로 되돌려(스레드를 붙잡지 않음) 프록시가 포화돼도 다른 요청은 살아있게 했다
+- 매 `/v1` 요청의 API 키 조회·단가표 조회를 Caffeine 캐시로 감쌈 → 둘 다 준정적 데이터라 캐시 히트 경로조차 DB를 4번 왕복하던 걸 줄였다. 키 인증 캐시는 폐기 반영 지연을 최소화하려고 TTL 30초 + 폐기 시 `@CacheEvict`로 즉시 무효화(실서버에서 폐기 직후 401 확인). 키 조회 결과는 엔티티가 아니라 식별자만 담은 record(`ApiKeyPrincipal`)로 캐시해 세션 종료 후 지연 로딩 문제를 피했다
+- prod fail-fast 강화 + 헬스체크 추가 → 프로바이더 키(`OPENAI_API_KEY`/`ANTHROPIC_API_KEY`)를 prod에서 기본값 없는 환경변수로 바꿔(누락 시 부팅 실패) "키 없이 떠서 모든 프록시가 401 나는 조용한 장애"를 막고, `spring-boot-starter-actuator`로 `/actuator/health`를 열어 배포·Nginx 헬스체크가 가능하게 했다(prod는 health만 노출)
+- (운영 배포 blocker) prod는 `ddl-auto=validate`라 스키마가 없으면 부팅이 실패하는데 저장소에 DDL이 없었다 → 엔티티 메타데이터에서 MySQL DDL을 뽑아 [db/schema.sql](db/schema.sql)로 커밋하고, 배포 절차에 "DDL 선적용 후 기동"을 명시했다(아래)
+
+## 배포 절차 (prod, EC2)
+
+1. 운영 MySQL에 `tollm` 데이터베이스 생성 (최소 권한 전용 계정 사용, root 금지)
+2. 스키마 적용: `mysql -u <user> -p tollm < db/schema.sql` (prod는 `validate`라 이 단계가 선행되어야 부팅 성공)
+3. 아래 환경변수 설정 후 `SPRING_PROFILES_ACTIVE=prod`로 기동 (하나라도 빠지면 fail-fast로 부팅 실패)
+   - 필수: `SPRING_PROFILES_ACTIVE=prod`, `DB_URL`, `DB_USERNAME`, `DB_PASSWORD`, `REDIS_HOST`, `JWT_SECRET`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`
+   - 선택: `REDIS_PORT`(기본 6379)
+4. 기동 확인: `curl http://localhost:8080/actuator/health` → `{"status":"UP"}`
+5. Nginx는 앱(8080) 앞단 리버스 프록시로 두고, `proxy_read_timeout`을 앱 read timeout(60초)보다 크게(예: 75초) 잡는다

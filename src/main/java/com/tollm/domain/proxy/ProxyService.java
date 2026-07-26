@@ -17,13 +17,16 @@ import com.tollm.domain.usage.RequestLogRepository;
 import com.tollm.domain.usage.UsageQuota;
 import com.tollm.domain.usage.UsageQuotaRepository;
 import com.tollm.domain.user.UserRepository;
+import com.tollm.global.config.TollmProperties;
 import com.tollm.global.error.ApiException;
+import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.util.concurrent.Semaphore;
 
 @Slf4j
 @Service
@@ -45,6 +48,16 @@ public class ProxyService {
     private final TeamRepository teamRepository;
     // "요청 1건이 어느 키로 왔는지" 기록용(add-on) - apiKeyId가 null이어도(옛 호출부) 나머지 로직은 그대로 동작한다
     private final ApiKeyRepository apiKeyRepository;
+    private final TollmProperties properties;
+
+    // [성능/안정성 수정] 외부 LLM 동시 호출 격벽(bulkhead). tryAcquire()로 즉시 실패시켜
+    // 초과 요청이 톰캣 스레드를 붙잡지 않게 한다 (근거는 TollmProperties.Proxy 주석 참고).
+    private Semaphore upstreamBulkhead;
+
+    @PostConstruct
+    void initBulkhead() {
+        upstreamBulkhead = new Semaphore(properties.getProxy().getMaxConcurrentUpstream());
+    }
 
     // 흐름 (README 플로우차트 + SEC-03 보안 수정 반영):
     // 1. rateLimitService.tryConsume - 실패 시 429
@@ -95,6 +108,15 @@ public class ProxyService {
         }
 
         JsonNode root = parseBody(body);
+        // [보안 수정 SEC-04] stream:true 요청 거부. 스트리밍 응답은 SSE 텍스트(data: {...})라
+        // 우리 파서(extractTokens)가 JSON으로 못 읽어 토큰=0 → 비용=0으로 기록되고, 그 결과
+        // 실제로는 프로바이더 비용이 발생했는데 UsageQuota에는 반영되지 않아 월 한도를 무제한
+        // 우회할 수 있다(SEC-03과 동일한 "과금 미보장 요청 통과" 클래스). 부수적으로 SSE 원문이
+        // 캐시에 들어가면 이후 비스트림 요청이 깨진 응답을 받는 오염도 생긴다. 이 게이트웨이는
+        // 스트리밍을 지원하지 않으므로 외부 호출 전에 400으로 차단한다.
+        if (root.path("stream").asBoolean(false)) {
+            throw ApiException.badRequest("스트리밍(stream=true) 요청은 지원하지 않습니다");
+        }
         String model = extractModel(root);
         // [보안 수정 SEC-03] 단가표(LlmModel)에 없는 모델은 여기서 즉시 거부한다.
         // ProviderRouter.route()는 모델명 접두어(gpt-*/claude*)만 검사하므로, 단가표에 없는
@@ -115,8 +137,18 @@ public class ProxyService {
             return cached;
         }
 
+        // 외부 호출만 격벽으로 감싼다 (캐시 히트 경로는 위에서 이미 반환됨). 포화 시 즉시 503으로
+        // 되돌려 스레드를 붙잡지 않는다 - 그래야 프록시가 막혀도 로그인/대시보드가 살아있다.
+        if (!upstreamBulkhead.tryAcquire()) {
+            throw ApiException.serviceUnavailable("서버가 일시적으로 혼잡합니다. 잠시 후 다시 시도하세요");
+        }
         long start = System.currentTimeMillis();
-        String response = client.chat(body);
+        String response;
+        try {
+            response = client.chat(body);
+        } finally {
+            upstreamBulkhead.release();
+        }
         long latencyMs = System.currentTimeMillis() - start;
 
         int[] tokens = extractTokens(response);

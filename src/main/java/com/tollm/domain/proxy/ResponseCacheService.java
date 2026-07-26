@@ -1,6 +1,8 @@
 package com.tollm.domain.proxy;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.tollm.global.auth.HashUtils;
 import com.tollm.global.config.TollmProperties;
 import lombok.RequiredArgsConstructor;
@@ -13,15 +15,12 @@ import java.time.Duration;
 @RequiredArgsConstructor
 public class ResponseCacheService {
 
-    // 필드 구분자. normalize()가 content 내부의 연속 공백을 이미 한 칸으로 압축하므로,
-    // 구분자로 쓰는 공백과 실제 내용의 공백이 섞여도 같은 입력에는 항상 같은 해시가 나온다는
-    // 결정성(determinism)만 지키면 충분하고, 경계가 다른 두 요청이 우연히 같은 해시로
-    // 충돌할 확률은 SHA-256 특성상 무시할 수 있는 수준이다.
     private static final String SEP = " ";
     private static final String KEY_PREFIX = "cache:";
 
     private final StringRedisTemplate redisTemplate;
     private final TollmProperties properties;
+    private final ObjectMapper objectMapper;
 
     // 캐시 키 생성 책임을 ProxyService가 아니라 여기 두는 이유:
     // "무엇을 같은 요청으로 취급할지"(정규화 규칙, 해시 알고리즘)는 캐시의 구현 세부사항이다.
@@ -45,26 +44,26 @@ public class ResponseCacheService {
         return buildKeyInternal("team:" + teamId, root);
     }
 
+    // [정합성 수정] 예전엔 model + messages(role:content)만 키에 넣고, 그것도 content를
+    // asText()로만 읽었다. 문제 두 가지:
+    //  1) content가 OpenAI 표준 배열 형식([{"type":"text","text":"질문"}])이면 asText()가
+    //     빈 문자열을 반환 → 서로 다른 질문이 role만 남은 같은 키로 충돌해 남의 답이 나갔다.
+    //  2) 응답을 바꾸는 파라미터(temperature, max_tokens, response_format 등)가 키에서 빠져,
+    //     max_tokens=50과 4000이 같은 키가 되어 잘린 응답을 캐시 히트로 받았다.
+    // 그래서 "정규화된 요청 본문 전체"를 키에 넣는다. 같은 바이트 입력은 항상 같은 해시가 되고
+    // (필드 순서까지 그대로 유지), 조금이라도 다른 요청은 다른 키가 되어 오응답이 원천 차단된다.
+    // 트레이드오프: 공백/필드순서만 다른 의미상 같은 요청은 캐시 미스가 될 수 있으나, 이는
+    // "안전한 미스"라 잘못된 히트(남의/다른 파라미터의 응답)보다 항상 낫다.
     private String buildKeyInternal(String principal, JsonNode root) {
-        String model = root.path("model").asText("");
-
-        StringBuilder messagesPart = new StringBuilder();
-        for (JsonNode message : root.path("messages")) {
-            String role = message.path("role").asText("");
-            String content = normalize(message.path("content").asText(""));
-            messagesPart.append(role).append(':').append(content).append(SEP);
+        String canonicalBody;
+        try {
+            canonicalBody = objectMapper.writeValueAsString(root);
+        } catch (JsonProcessingException e) {
+            // 이미 파싱에 성공한 JsonNode라 사실상 도달 불가하지만, 실패하면 캐시를 못 쓸 뿐
+            // (매번 다른 키처럼 취급) 정확성은 유지된다.
+            canonicalBody = String.valueOf(root.hashCode());
         }
-
-        String raw = principal + SEP + model + SEP + messagesPart;
-        return KEY_PREFIX + HashUtils.sha256(raw);
-    }
-
-    // 공백 정리: 앞뒤 공백 제거 + 연속 공백/개행을 한 칸으로 압축.
-    // 의미상 같은 프롬프트가 줄바꿈/들여쓰기 차이만으로 캐시 미스가 되는 것을 막는다.
-    // (여기서 말하는 "exact 캐시"는 어디까지나 정규화된 텍스트의 완전 일치를 뜻하며,
-    //  의미적으로 유사한 다른 표현까지 매칭하는 시맨틱 캐시는 non-goal이라 다루지 않는다)
-    private String normalize(String content) {
-        return content.strip().replaceAll("\\s+", " ");
+        return KEY_PREFIX + HashUtils.sha256(principal + SEP + canonicalBody);
     }
 
     public String get(String cacheKey) {

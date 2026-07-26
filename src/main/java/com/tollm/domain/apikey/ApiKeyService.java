@@ -11,8 +11,10 @@ import com.tollm.domain.usage.dto.UsageSummaryResponse;
 import com.tollm.domain.user.User;
 import com.tollm.domain.user.UserRepository;
 import com.tollm.global.auth.HashUtils;
+import com.tollm.global.config.CacheConfig;
 import com.tollm.global.error.ApiException;
 import lombok.RequiredArgsConstructor;
+import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -46,7 +48,10 @@ public class ApiKeyService {
         return toSummaries(apiKeyRepository.findByUserId(userId));
     }
 
+    // @CacheEvict: 폐기한 키가 인증 캐시(TTL 30초)에 남아 최대 30초간 계속 통과하는 걸 막기 위해
+    // 폐기 시 인증 캐시를 통째로 비운다. 폐기는 드문 이벤트라 전체 무효화 비용은 무시할 만하다.
     @Transactional
+    @CacheEvict(cacheNames = CacheConfig.API_KEY_AUTH, allEntries = true)
     public void revoke(Long userId, Long keyId) {
         ApiKey key = apiKeyRepository.findById(keyId)
                 .orElseThrow(() -> ApiException.notFound("키를 찾을 수 없습니다"));
@@ -77,6 +82,7 @@ public class ApiKeyService {
     }
 
     @Transactional
+    @CacheEvict(cacheNames = CacheConfig.API_KEY_AUTH, allEntries = true) // 팀 키 폐기도 인증 캐시 무효화 (revoke와 동일 이유)
     public void revokeTeamKey(Long userId, Long teamId, Long keyId) {
         TeamMember member = requireMember(teamId, userId);
         ApiKey key = apiKeyRepository.findById(keyId)

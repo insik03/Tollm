@@ -54,5 +54,12 @@ public class TollmProperties {
         // 잡아도 1MB면 충분하다고 판단했다. Content-Length 헤더 기준으로 사전에 거부하므로
         // 초과 요청은 본문을 읽기 전에 413으로 차단된다(RequestSizeLimitFilter)
         private long maxRequestBodyBytes = 1_048_576;
+
+        // [성능/안정성 수정] 외부 LLM 동시 호출 상한(격벽, bulkhead). relay()는 외부 응답을
+        // 블로킹으로 최대 60초 기다리므로, 프로바이더가 느려지면 톰캣 워커 스레드(기본 200)가
+        // 전부 LLM 대기로 물려 로그인/대시보드 같은 무관한 요청까지 먹통이 된다. 동시 외부 호출을
+        // 이 값으로 제한하고 초과분은 즉시 503으로 되돌려(스레드를 붙잡지 않고 빠르게 반환),
+        // 톰캣 스레드 일부를 항상 다른 엔드포인트용으로 남겨둔다. 톰캣 max-threads보다 작게 잡는다.
+        private int maxConcurrentUpstream = 100;
     }
 }

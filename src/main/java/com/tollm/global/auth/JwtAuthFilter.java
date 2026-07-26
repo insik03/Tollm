@@ -10,6 +10,7 @@ import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
+import org.springframework.web.util.UrlPathHelper;
 
 import java.io.IOException;
 import java.util.List;
@@ -22,13 +23,20 @@ public class JwtAuthFilter extends OncePerRequestFilter {
     private static final List<String> PROTECTED_PREFIXES =
             List.of("/keys", "/usage", "/teams", "/admin");
 
+    // [보안 수정] getRequestURI()는 퍼센트 인코딩을 "디코딩하지 않은" 원문을 돌려주는 반면,
+    // Spring MVC는 디코딩된 경로(/admin)로 컨트롤러를 매핑한다. 두 경로가 어긋나면
+    // GET /%61dmin/usage 가 이 필터의 prefix 매칭은 통과(우회)하면서 AdminController에는
+    // 그대로 라우팅돼 비인증 관리자 접근이 성립한다. Spring이 매핑에 쓰는 것과 같은 방식으로
+    // 디코딩·정규화한 경로로 판정해, 필터와 컨트롤러가 항상 "같은 경로"를 보게 한다.
+    private static final UrlPathHelper PATH_HELPER = UrlPathHelper.defaultInstance;
+
     private final JwtProvider jwtProvider;
     private final ObjectMapper objectMapper;
 
     // true를 반환하면 이 요청은 필터를 건너뛴다 (/auth, /v1 등은 JWT 검증 대상 아님)
     @Override
     protected boolean shouldNotFilter(HttpServletRequest request) {
-        String path = request.getRequestURI();
+        String path = PATH_HELPER.getPathWithinApplication(request);
         return PROTECTED_PREFIXES.stream().noneMatch(path::startsWith);
     }
 
@@ -46,8 +54,8 @@ public class JwtAuthFilter extends OncePerRequestFilter {
             Long userId = jwtProvider.getUserId(token);
             String role = jwtProvider.parse(token).get("role", String.class);
 
-            // /admin/** 은 ADMIN만
-            if (request.getRequestURI().startsWith("/admin") && !"ADMIN".equals(role)) {
+            // /admin/** 은 ADMIN만 (여기도 디코딩된 경로로 판정 - 위 shouldNotFilter와 동일한 이유)
+            if (PATH_HELPER.getPathWithinApplication(request).startsWith("/admin") && !"ADMIN".equals(role)) {
                 writeError(response, HttpServletResponse.SC_FORBIDDEN, "관리자 권한이 필요합니다");
                 return;
             }

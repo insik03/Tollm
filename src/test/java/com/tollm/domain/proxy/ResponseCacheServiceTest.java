@@ -33,7 +33,7 @@ class ResponseCacheServiceTest {
     void setUp() {
         TollmProperties properties = new TollmProperties();
         properties.getCache().setTtlSeconds(3600);
-        cacheService = new ResponseCacheService(redisTemplate, properties);
+        cacheService = new ResponseCacheService(redisTemplate, properties, objectMapper);
     }
 
     private JsonNode parse(String json) throws Exception {
@@ -56,17 +56,29 @@ class ResponseCacheServiceTest {
     }
 
     @Test
-    void 공백_차이만_있으면_같은_키로_정규화된다() throws Exception {
-        JsonNode a = parse("{\"model\":\"gpt-4o-mini\",\"messages\":[{\"role\":\"user\",\"content\":\"hello   world\"}]}");
-        JsonNode b = parse("{\"model\":\"gpt-4o-mini\",\"messages\":[{\"role\":\"user\",\"content\":\"  hello world  \"}]}");
-
-        assertThat(cacheService.buildKey(1L, a)).isEqualTo(cacheService.buildKey(1L, b));
-    }
-
-    @Test
     void 내용이_다르면_다른_키가_나온다() throws Exception {
         JsonNode a = parse("{\"model\":\"gpt-4o-mini\",\"messages\":[{\"role\":\"user\",\"content\":\"hello\"}]}");
         JsonNode b = parse("{\"model\":\"gpt-4o-mini\",\"messages\":[{\"role\":\"user\",\"content\":\"world\"}]}");
+
+        assertThat(cacheService.buildKey(1L, a)).isNotEqualTo(cacheService.buildKey(1L, b));
+    }
+
+    // [정합성 회귀] 예전엔 content를 asText()로만 읽어, OpenAI 표준 배열 형식의 서로 다른 질문이
+    // 모두 빈 문자열로 처리돼 같은 키로 충돌했다(남의 답이 나가는 버그). 전체 본문을 키에 넣어 해소.
+    @Test
+    void content가_배열_형식이고_내용이_다르면_다른_키가_나온다() throws Exception {
+        JsonNode a = parse("{\"model\":\"gpt-4o-mini\",\"messages\":[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"질문A\"}]}]}");
+        JsonNode b = parse("{\"model\":\"gpt-4o-mini\",\"messages\":[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"질문B\"}]}]}");
+
+        assertThat(cacheService.buildKey(1L, a)).isNotEqualTo(cacheService.buildKey(1L, b));
+    }
+
+    // [정합성 회귀] 예전엔 model+messages만 키에 넣어 max_tokens=50과 4000이 같은 키가 됐다
+    // (잘린 응답을 캐시 히트로 받는 버그). 응답을 바꾸는 파라미터도 키에 반영됨을 검증.
+    @Test
+    void 같은_messages여도_파라미터가_다르면_다른_키가_나온다() throws Exception {
+        JsonNode a = parse("{\"model\":\"gpt-4o-mini\",\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}],\"max_tokens\":50}");
+        JsonNode b = parse("{\"model\":\"gpt-4o-mini\",\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}],\"max_tokens\":4000}");
 
         assertThat(cacheService.buildKey(1L, a)).isNotEqualTo(cacheService.buildKey(1L, b));
     }

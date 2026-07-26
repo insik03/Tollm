@@ -29,6 +29,13 @@ dependencies {
     implementation 'org.springframework.boot:spring-boot-starter-validation'
     implementation 'org.springframework.boot:spring-boot-starter-data-redis'
     implementation 'org.springframework.boot:spring-boot-starter-aop'
+    // 헬스체크(/actuator/health): 배포 스크립트의 기동 완료 확인, Nginx/systemd 헬스체크,
+    // 부하 테스트 중 상태 관측용. prod에서는 health만 노출한다(application.yml management 참고)
+    implementation 'org.springframework.boot:spring-boot-starter-actuator'
+    // 인메모리 캐시(Caffeine): 매 /v1 요청마다 하던 API 키 조회/단가표 조회를 캐시해 DB 왕복을 줄인다.
+    // TTL·최대 크기 제어가 필요해 ConcurrentMapCache 대신 Caffeine을 쓴다(CacheConfig 참고)
+    implementation 'org.springframework.boot:spring-boot-starter-cache'
+    implementation 'com.github.ben-manes.caffeine:caffeine'
     // JWT
     implementation 'io.jsonwebtoken:jjwt-api:0.12.6'
     runtimeOnly 'io.jsonwebtoken:jjwt-impl:0.12.6'

@@ -1,6 +1,6 @@
 package com.tollm.domain.usage;
 
-import com.tollm.domain.apikey.ApiKeyRepository;
+import com.tollm.domain.apikey.ApiKeyLookupService;
 import com.tollm.domain.usage.dto.RequestLogResponse;
 import com.tollm.domain.usage.dto.UsageSummaryResponse;
 import com.tollm.global.auth.JwtProvider;
@@ -51,7 +51,7 @@ class UsageControllerTest {
     private JwtProvider jwtProvider;
 
     @MockBean
-    private ApiKeyRepository apiKeyRepository;
+    private ApiKeyLookupService apiKeyLookupService;
 
     @MockBean
     private TollmProperties tollmProperties;
