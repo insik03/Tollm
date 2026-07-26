@@ -1,0 +1,35 @@
+# Tollm 앱을 systemd 서비스로 등록 (과제 예시의 foreground `java -jar`를 한 단계 개선).
+# 왜 systemd: foreground 실행은 SSH를 끊으면 앱도 죽는다. systemd로 등록하면 부팅 시 자동 시작 +
+# 죽으면 자동 재시작 + 로그 관리(journalctl)를 OS가 해준다. 과제 gist도 nginx/mysql을 systemd로
+# 관리하므로 방식이 일관된다.
+#
+# 적용:
+#   sudo cp deploy/tollm.service /etc/systemd/system/tollm.service
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable tollm      # 부팅 시 자동 시작
+#   sudo systemctl start tollm
+#   sudo systemctl status tollm      # 상태 확인
+#   journalctl -u tollm -f           # 실시간 로그
+#
+# 주의: 아래 경로/사용자는 git clone 위치에 맞춰 조정할 것 (기본: ubuntu 사용자 홈에 clone).
+# jar 파일명은 build 후 `ls build/libs` 로 확인 (실행용은 -plain 이 안 붙은 tollm-0.0.1-SNAPSHOT.jar).
+
+[Unit]
+Description=Tollm LLM API Gateway
+# MySQL/Redis가 먼저 떠 있어야 앱이 DB/캐시에 연결할 수 있다
+After=network.target mysql.service redis-server.service
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/Tollm
+# 민감정보(DB 비밀번호, JWT_SECRET, 프로바이더 키)는 이 파일에 두고 git에는 올리지 않는다
+EnvironmentFile=/etc/tollm/tollm.env
+ExecStart=/usr/bin/java -jar /home/ubuntu/Tollm/build/libs/tollm-0.0.1-SNAPSHOT.jar
+# Spring Boot가 SIGTERM으로 정상 종료될 때의 종료코드 143을 실패로 보지 않음
+SuccessExitStatus=143
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
