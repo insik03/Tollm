@@ -35,6 +35,7 @@ public class DataInitializer implements CommandLineRunner {
         // 데모/테스트 비용이 크게 나오지 않도록 각 프로바이더의 저가 모델만 시드한다.
         // 단가는 공급사 공개 가격 기준(1M 토큰당 USD) - 실 키 확보 후 변동 시 갱신 필요.
         seedIfAbsent(openai, "gpt-4o-mini", "0.15", "0.60");
+        seedIfAbsent(openai, "gpt-5.4-mini", "0.75", "4.50");
         seedIfAbsent(anthropic, "claude-haiku-4-5", "1.00", "5.00");
     }
 
