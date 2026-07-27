@@ -22,6 +22,8 @@ import java.security.SecureRandom;
 import java.time.LocalDateTime;
 import java.util.Base64;
 import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
@@ -75,10 +77,20 @@ public class ApiKeyService {
         return issueInternal(user, team);
     }
 
+    // 팀 키 목록: 각 키를 "누가 발급했는지"(발급자)를 함께 준다. 발급자 표시는 팀 멤버가 설정한
+    // 닉네임을 우선하고, 없으면 이메일로 대체한다(멤버별 사용량 표시와 동일한 규칙).
     @Transactional(readOnly = true)
     public List<ApiKeySummary> teamKeys(Long userId, Long teamId) {
         requireMember(teamId, userId);
-        return toSummaries(apiKeyRepository.findByTeamId(teamId));
+        Map<Long, String> nicknameByUser = teamMemberRepository.findByTeamId(teamId).stream()
+                .filter(m -> m.getNickname() != null && !m.getNickname().isBlank())
+                .collect(Collectors.toMap(m -> m.getUser().getId(), TeamMember::getNickname, (a, b) -> a));
+        return apiKeyRepository.findByTeamId(teamId).stream()
+                .map(k -> {
+                    String issuer = nicknameByUser.getOrDefault(k.getUser().getId(), k.getUser().getEmail());
+                    return new ApiKeySummary(k.getId(), k.getPrefix(), k.getStatus().name(), issuer, k.getCreatedAt());
+                })
+                .toList();
     }
 
     @Transactional
@@ -152,9 +164,10 @@ public class ApiKeyService {
         return new ApiKeyIssueResponse(saved.getId(), rawKey, prefix); // 원문 노출은 이 응답이 처음이자 마지막
     }
 
+    // 개인 키 목록: 발급자는 본인이라 표시 불필요 → issuer=null
     private List<ApiKeySummary> toSummaries(List<ApiKey> keys) {
         return keys.stream()
-                .map(k -> new ApiKeySummary(k.getId(), k.getPrefix(), k.getStatus().name(), k.getCreatedAt()))
+                .map(k -> new ApiKeySummary(k.getId(), k.getPrefix(), k.getStatus().name(), null, k.getCreatedAt()))
                 .toList();
     }
 

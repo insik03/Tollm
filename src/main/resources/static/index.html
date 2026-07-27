@@ -278,7 +278,7 @@
           <p class="hint">발급된 팀 키(tlm_...)는 "채팅 테스트"·"레이트리밋 데모" 탭에도 그대로 붙여넣어 쓸 수 있습니다 -
             팀 키는 개인 키와 동일한 방식으로 인증되고, 쿼터/레이트리밋만 팀 단위로 집계됩니다.</p>
           <table>
-            <thead><tr><th>Prefix</th><th>상태</th><th>발급일</th><th>사용량</th><th></th></tr></thead>
+            <thead><tr><th>Prefix</th><th>발급자</th><th>상태</th><th>발급일</th><th>사용량</th><th></th></tr></thead>
             <tbody id="teamKeysTable"></tbody>
           </table>
         </div>
@@ -742,11 +742,12 @@ async function loadTeamKeys() {
   document.getElementById('teamKeysTable').innerHTML = r.data.map(k => `
     <tr>
       <td><code>${k.prefix}</code></td>
+      <td>${escapeHtml(k.issuer || '-')}</td>
       <td><span class="badge ${k.status === 'ACTIVE' ? 'badge-ok' : 'badge-off'}">${k.status}</span></td>
       <td>${(k.createdAt || '').replace('T', ' ').slice(0, 19)}</td>
       <td id="teamKeyUsage-${k.id}"><button class="btn-outline" style="padding:3px 8px;font-size:11px" onclick="showTeamKeyUsage(${k.id})">사용량 보기</button></td>
       <td>${k.status === 'ACTIVE' ? `<button class="btn-danger" onclick="revokeTeamKeyUi(${k.id})">폐기</button>` : ''}</td>
-    </tr>`).join('') || '<tr><td colspan="5" style="color:#9ca3af">발급된 팀 키가 없습니다</td></tr>';
+    </tr>`).join('') || '<tr><td colspan="6" style="color:#9ca3af">발급된 팀 키가 없습니다</td></tr>';
 }
 
 async function showTeamKeyUsage(id) {
