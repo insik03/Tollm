@@ -2,6 +2,7 @@ package com.tollm.domain.providerkey;
 
 import com.tollm.domain.providerkey.dto.ProviderKeySummary;
 import com.tollm.domain.team.Team;
+import com.tollm.domain.team.TeamMember;
 import com.tollm.domain.team.TeamMemberRepository;
 import com.tollm.domain.team.TeamRepository;
 import com.tollm.domain.user.User;
@@ -82,11 +83,13 @@ public class ProviderKeyService {
 
     // ---- 팀 BYOK (add-on) ----
     // 팀 요청은 서버 공용키가 아니라 "팀이 등록한 키"로 나간다(검수 #9 근본 해결).
-    // 팀원이면 누구나 팀 키를 등록/조회/삭제할 수 있게 한다(팀 키 발급 정책과 동일).
+    // [phase2 검수] 팀 공용 키(=팀 과금이 걸리는 민감 자원)의 등록/교체/삭제는 OWNER만 할 수 있게 한다.
+    // 그렇지 않으면 아무 멤버나 팀 키를 지워 팀 전체 프록시를 막거나(DoS), 자기 키로 덮어써 과금을
+    // 가로챌 수 있다. 조회(teamKeys)는 마스킹만 보여주므로 팀원 누구나 허용.
 
     @Transactional
     public ProviderKeySummary registerTeamKey(Long userId, Long teamId, String provider, String rawKey) {
-        requireMember(teamId, userId);
+        requireOwner(teamId, userId);
         String normalized = normalizeProvider(provider);
         String key = rawKey == null ? "" : rawKey.trim();
         if (key.isEmpty()) {
@@ -120,7 +123,7 @@ public class ProviderKeyService {
 
     @Transactional
     public void deleteTeamKey(Long userId, Long teamId, String provider) {
-        requireMember(teamId, userId);
+        requireOwner(teamId, userId);
         String normalized = normalizeProvider(provider);
         TeamProviderCredential cred = teamProviderCredentialRepository.findByTeamIdAndProvider(teamId, normalized)
                 .orElseThrow(() -> ApiException.notFound("등록된 팀 키가 없습니다"));
@@ -138,6 +141,15 @@ public class ProviderKeyService {
     private void requireMember(Long teamId, Long userId) {
         teamMemberRepository.findByTeamIdAndUserId(teamId, userId)
                 .orElseThrow(() -> ApiException.forbidden("팀 멤버만 접근할 수 있습니다"));
+    }
+
+    // 팀 OWNER 여부 검증 - 팀 공용 키 등록/삭제 같은 민감 작업 전용
+    private void requireOwner(Long teamId, Long userId) {
+        TeamMember member = teamMemberRepository.findByTeamIdAndUserId(teamId, userId)
+                .orElseThrow(() -> ApiException.forbidden("팀 멤버만 접근할 수 있습니다"));
+        if (member.getTeamRole() != TeamMember.TeamRole.OWNER) {
+            throw ApiException.forbidden("팀 OWNER만 팀 LLM 키를 관리할 수 있습니다");
+        }
     }
 
     private String normalizeProvider(String provider) {

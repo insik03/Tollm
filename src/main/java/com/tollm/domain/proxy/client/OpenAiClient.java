@@ -14,7 +14,6 @@ import org.springframework.web.client.RestClientResponseException;
 public class OpenAiClient implements LlmClient {
 
     private final RestClient restClient;
-    private final String serverApiKey; // 설정으로 주입된 서버 공용키 (BYOK 미등록 사용자 폴백용)
 
     public OpenAiClient(TollmProperties properties, ClientHttpRequestFactory llmRequestFactory) {
         TollmProperties.Provider p = properties.getProviders().get("openai");
@@ -22,17 +21,11 @@ public class OpenAiClient implements LlmClient {
                 .baseUrl(p.getBaseUrl())
                 .requestFactory(llmRequestFactory)
                 .build();
-        this.serverApiKey = p.getApiKey();
     }
 
     @Override
     public String providerName() {
         return "openai";
-    }
-
-    @Override
-    public String defaultApiKey() {
-        return serverApiKey;
     }
 
     @Override

@@ -96,15 +96,10 @@ spring:
       host: ${REDIS_HOST}
       port: ${REDIS_PORT:6379}
 
-# [운영 fail-fast] 공통 섹션의 프로바이더 키는 ${OPENAI_API_KEY:}처럼 빈 기본값이라, 로컬에서는
-# 키 없이도 부팅되지만 운영에서 키를 빠뜨리면 "부팅은 성공하는데 모든 /v1 요청이 401로 실패하는"
-# 조용한 장애가 난다. 게이트웨이의 핵심 기능이 프록시이므로 사실상 전면 장애다. prod에서는 기본값을
-# 없애(${OPENAI_API_KEY}) 키 누락 시 아예 부팅이 실패하도록 강제한다(JWT_SECRET/DB와 같은 원칙).
+# [순수 BYOK 전환] 예전(H1)엔 서버 공용 프로바이더 키를 prod에서 fail-fast로 강제했지만, 이제
+# 모든 요청이 개인/팀이 등록한 키로만 나가고(서버 공용키 완전 미사용), 클라이언트도 provider.api-key를
+# 더 이상 읽지 않는다. 따라서 OPENAI_API_KEY/ANTHROPIC_API_KEY는 운영 필수 값에서 제외한다.
+# 대신 사용자 키 암호화 마스터키(BYOK_ENCRYPTION_KEY)는 반드시 환경변수로 강제한다.
 tollm:
-  providers:
-    openai:
-      api-key: ${OPENAI_API_KEY}
-    anthropic:
-      api-key: ${ANTHROPIC_API_KEY}
   security:
     byok-encryption-key: ${BYOK_ENCRYPTION_KEY}   # 운영은 반드시 환경변수 (없으면 부팅 실패)
