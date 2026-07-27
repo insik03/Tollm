@@ -160,6 +160,12 @@ public class ProviderKeyService {
         if (p.length() > 50) {
             throw ApiException.badRequest("provider 이름이 너무 깁니다");
         }
+        // [검수 HIGH/MEDIUM] provider가 대시보드 테이블에 렌더되므로, 안전 문자(영소문자/숫자/. _ -)만
+        // 허용해 저장형 XSS 페이로드(<, >, ", ', (, ) 등)가 애초에 저장되지 못하게 한다(근본 방어).
+        // 프로바이더 이름은 openai/anthropic/kimi/mistral 등 이 문자 집합으로 충분하다.
+        if (!p.matches("[a-z0-9._-]+")) {
+            throw ApiException.badRequest("provider 이름은 영문 소문자/숫자/. _ - 만 사용할 수 있습니다");
+        }
         return p;
     }
 

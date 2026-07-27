@@ -4,6 +4,7 @@ import com.github.benmanes.caffeine.cache.Caffeine;
 import org.springframework.cache.CacheManager;
 import org.springframework.cache.annotation.EnableCaching;
 import org.springframework.cache.caffeine.CaffeineCacheManager;
+import org.springframework.cache.transaction.TransactionAwareCacheManagerProxy;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
@@ -33,6 +34,10 @@ public class CacheConfig {
                 .expireAfterWrite(Duration.ofHours(1))
                 .maximumSize(1_000)
                 .build());
-        return manager;
+        // [검수] 트랜잭션 인식 래핑: @Transactional 안에서 @CacheEvict가 "커밋 전"에 도는 순서가 되면,
+        // 커밋 전 들어온 동시 요청이 아직 ACTIVE인 (폐기 전) 키를 다시 캐시해 최대 TTL(30초)간 계속
+        // 인증되는 창이 생긴다(키 폐기/팀 탈퇴·해지 시). 프록시로 감싸면 캐시 쓰기/삭제가 커밋 이후에만
+        // 반영되어 이 창을 없앤다.
+        return new TransactionAwareCacheManagerProxy(manager);
     }
 }

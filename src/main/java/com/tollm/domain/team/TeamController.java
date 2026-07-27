@@ -141,7 +141,7 @@ public class TeamController {
     }
 
     // ---- 팀 LLM 프로바이더 키 (BYOK) ----
-    // 팀 요청은 이 팀 키로만 나간다(서버 공용키 폴백 없음). 팀원이면 등록/조회/삭제 가능.
+    // 팀 요청은 이 팀 키로만 나간다(서버 공용키 폴백 없음). 등록/삭제는 OWNER만, 조회(마스킹)는 팀원 누구나.
     @PostMapping("/{teamId}/provider-keys")
     @ResponseStatus(HttpStatus.CREATED)
     public ProviderKeySummary registerTeamProviderKey(@RequestAttribute("userId") Long userId,

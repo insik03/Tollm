@@ -411,7 +411,7 @@ async function loadProviderKeys() {
   if (r.status !== 200) return;
   document.getElementById('byokTable').innerHTML = r.data.map(k => `
     <tr>
-      <td>${k.provider}</td>
+      <td>${escapeHtml(k.provider)}</td>
       <td>${escapeHtml(k.label || '-')}</td>
       <td><code>${escapeHtml(k.keyPreview)}</code></td>
       <td>${(k.registeredAt || '').replace('T', ' ').slice(0, 19)}</td>
@@ -590,7 +590,7 @@ async function loadTeamProviderKeys() {
   if (r.status !== 200) return;
   document.getElementById('teamByokTable').innerHTML = r.data.map(k => `
     <tr>
-      <td>${k.provider}</td>
+      <td>${escapeHtml(k.provider)}</td>
       <td><code>${escapeHtml(k.keyPreview)}</code></td>
       <td>${(k.registeredAt || '').replace('T', ' ').slice(0, 19)}</td>
       <td><button class="btn-danger" onclick="deleteTeamProviderKey('${k.provider}')">삭제</button></td>
