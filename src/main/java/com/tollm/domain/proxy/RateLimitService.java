@@ -32,6 +32,12 @@ public class RateLimitService {
         return consume("bucket:team:" + teamId);
     }
 
+    // [봇 방어] 인증 전(가입/로그인)·키 발급 같은 민감 엔드포인트를 IP 단위로 제한한다. userId가 아직
+    // 없거나(가입/로그인) 계정을 무한정 만들 수 있는 공격을 막기 위해 IP를 버킷 키로 쓴다.
+    public boolean tryConsumeByIp(String ip) {
+        return consume("bucket:ip:" + ip);
+    }
+
     private boolean consume(String key) {
         TollmProperties.RateLimit rateLimit = properties.getRateLimit();
 

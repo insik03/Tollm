@@ -48,6 +48,9 @@ class AdminControllerTest {
     @MockBean
     private TollmProperties tollmProperties;
 
+    @MockBean
+    private com.tollm.domain.proxy.RateLimitService rateLimitService;
+
     @Test
     void 전체_사용량_통계는_집계_DTO를_반환한다() throws Exception {
         given(adminService.allUsage(any(), any()))

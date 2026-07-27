@@ -10,4 +10,8 @@ public interface ApiKeyRepository extends JpaRepository<ApiKey, Long> {
     List<ApiKey> findByTeamId(Long teamId);
     // 특정 팀에서 특정 멤버가 발급한 팀 키 - 탈퇴/강제퇴장 시 그 멤버 키만 폐기하기 위함
     List<ApiKey> findByTeamIdAndUserId(Long teamId, Long userId);
+
+    // 활성 키 개수 상한 검사용 (개인 키 = team이 null인 것, 팀 키 = 팀별)
+    long countByUserIdAndTeamIsNullAndStatus(Long userId, ApiKey.Status status);
+    long countByTeamIdAndStatus(Long teamId, ApiKey.Status status);
 }

@@ -45,6 +45,10 @@ class AdminAuthorizationTest {
     @MockBean
     private TollmProperties tollmProperties;
 
+    // SensitiveEndpointRateLimitFilter(@Component)가 슬라이스에 올라오므로 의존성을 채워야 컨텍스트가 뜬다
+    @MockBean
+    private com.tollm.domain.proxy.RateLimitService rateLimitService;
+
     @Test
     void 토큰_없이_admin_호출하면_401() throws Exception {
         mockMvc.perform(get("/admin/usage"))

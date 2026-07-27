@@ -56,6 +56,9 @@ class UsageControllerTest {
     @MockBean
     private TollmProperties tollmProperties;
 
+    @MockBean
+    private com.tollm.domain.proxy.RateLimitService rateLimitService;
+
     @Test
     void 내_사용량_조회는_집계_DTO를_JSON으로_반환한다() throws Exception {
         given(usageService.myUsage(eq(1L), any(), any()))

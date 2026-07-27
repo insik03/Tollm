@@ -38,10 +38,17 @@ public class ApiKeyService {
     // 일반 Random은 예측 가능해서 보안 용도 금지. SecureRandom은 OS의 암호학적 난수원 사용
     private static final SecureRandom RANDOM = new SecureRandom();
 
+    // [봇 방어] 한 사용자/팀이 무제한으로 키를 발급해 DB를 부풀리는 걸 막는 활성 키 상한.
+    // 정상 사용엔 넉넉하지만 대량 발급 공격은 차단한다. (향후 요금제 도입 시 플랜별로 분기 가능)
+    private static final long MAX_ACTIVE_KEYS = 20;
+
     @Transactional
     public ApiKeyIssueResponse issue(Long userId) {
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> ApiException.notFound("사용자를 찾을 수 없습니다"));
+        if (apiKeyRepository.countByUserIdAndTeamIsNullAndStatus(userId, ApiKey.Status.ACTIVE) >= MAX_ACTIVE_KEYS) {
+            throw ApiException.badRequest("발급 가능한 활성 키 수(" + MAX_ACTIVE_KEYS + "개)를 초과했습니다. 안 쓰는 키를 폐기 후 다시 시도하세요");
+        }
         return issueInternal(user, null);
     }
 
@@ -70,6 +77,9 @@ public class ApiKeyService {
     @Transactional
     public ApiKeyIssueResponse issueForTeam(Long userId, Long teamId) {
         requireMember(teamId, userId); // 팀원이면 누구나 팀 키를 발급할 수 있게 허용
+        if (apiKeyRepository.countByTeamIdAndStatus(teamId, ApiKey.Status.ACTIVE) >= MAX_ACTIVE_KEYS) {
+            throw ApiException.badRequest("팀의 활성 키 수(" + MAX_ACTIVE_KEYS + "개)를 초과했습니다. 안 쓰는 키를 폐기 후 다시 시도하세요");
+        }
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> ApiException.notFound("사용자를 찾을 수 없습니다"));
         Team team = teamRepository.findById(teamId)
