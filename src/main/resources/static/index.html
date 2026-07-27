@@ -108,7 +108,7 @@
     <!-- 키 관리 -->
     <div id="keysPanel" class="panel">
       <div class="card">
-        <h2>API 키 관리</h2>
+        <h2>API 키 관리 <span id="keyLimitBadge" class="hint" style="font-weight:normal"></span></h2>
         <div class="btn-row"><button class="btn-primary" onclick="issueKey()">새 키 발급</button></div>
         <div id="keyReveal"></div>
         <table>
@@ -272,7 +272,7 @@
         </div>
 
         <div class="card">
-          <h2>팀 API 키</h2>
+          <h2>팀 API 키 <span id="teamKeyLimitBadge" class="hint" style="font-weight:normal"></span></h2>
           <div class="btn-row"><button class="btn-primary" onclick="issueTeamKey()">새 팀 키 발급</button></div>
           <div id="teamKeyReveal"></div>
           <p class="hint">발급된 팀 키(tlm_...)는 "채팅 테스트"·"레이트리밋 데모" 탭에도 그대로 붙여넣어 쓸 수 있습니다 -
@@ -462,6 +462,17 @@ async function loadKeys() {
       <td id="keyUsage-${k.id}"><button class="btn-outline" style="padding:3px 8px;font-size:11px" onclick="showKeyUsage(${k.id})">사용량 보기</button></td>
       <td>${k.status === 'ACTIVE' ? `<button class="btn-danger" onclick="revokeKey(${k.id})">폐기</button>` : ''}</td>
     </tr>`).join('') || '<tr><td colspan="5" style="color:#9ca3af">발급된 키가 없습니다</td></tr>';
+  loadKeyLimit();
+}
+
+// 활성 키 [사용/최대] 배지 - 발급하기 전에 몇 개 남았는지 보여준다
+async function loadKeyLimit() {
+  const badge = document.getElementById('keyLimitBadge');
+  if (!badge) return;
+  const r = await api('/keys/limit');
+  if (r.status !== 200) { badge.textContent = ''; return; }
+  const d = r.data;
+  badge.textContent = `[활성 ${d.active}/${d.maxActive} · ${d.remaining}개 남음]`;
 }
 
 // 이 키 "하나"의 사용량만 따로 조회한다 - /usage/me(전체 합산)와 달리 여러 키를 발급받았을 때
@@ -748,6 +759,16 @@ async function loadTeamKeys() {
       <td id="teamKeyUsage-${k.id}"><button class="btn-outline" style="padding:3px 8px;font-size:11px" onclick="showTeamKeyUsage(${k.id})">사용량 보기</button></td>
       <td>${k.status === 'ACTIVE' ? `<button class="btn-danger" onclick="revokeTeamKeyUi(${k.id})">폐기</button>` : ''}</td>
     </tr>`).join('') || '<tr><td colspan="6" style="color:#9ca3af">발급된 팀 키가 없습니다</td></tr>';
+  loadTeamKeyLimit();
+}
+
+async function loadTeamKeyLimit() {
+  const badge = document.getElementById('teamKeyLimitBadge');
+  if (!badge) return;
+  const r = await api(`/teams/${currentTeamId}/keys/limit`);
+  if (r.status !== 200) { badge.textContent = ''; return; }
+  const d = r.data;
+  badge.textContent = `[활성 ${d.active}/${d.maxActive} · ${d.remaining}개 남음]`;
 }
 
 async function showTeamKeyUsage(id) {

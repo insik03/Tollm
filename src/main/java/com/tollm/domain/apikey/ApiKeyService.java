@@ -1,6 +1,7 @@
 package com.tollm.domain.apikey;
 
 import com.tollm.domain.apikey.dto.ApiKeyIssueResponse;
+import com.tollm.domain.apikey.dto.ApiKeyLimitResponse;
 import com.tollm.domain.apikey.dto.ApiKeySummary;
 import com.tollm.domain.team.Team;
 import com.tollm.domain.team.TeamMember;
@@ -55,6 +56,20 @@ public class ApiKeyService {
     @Transactional(readOnly = true)
     public List<ApiKeySummary> myKeys(Long userId) {
         return toSummaries(apiKeyRepository.findByUserId(userId));
+    }
+
+    // 활성 키 상한 안내 (대시보드 [N/최대] 표시용)
+    @Transactional(readOnly = true)
+    public ApiKeyLimitResponse keyLimit(Long userId) {
+        long active = apiKeyRepository.countByUserIdAndTeamIsNullAndStatus(userId, ApiKey.Status.ACTIVE);
+        return new ApiKeyLimitResponse(MAX_ACTIVE_KEYS, active, Math.max(0, MAX_ACTIVE_KEYS - active));
+    }
+
+    @Transactional(readOnly = true)
+    public ApiKeyLimitResponse teamKeyLimit(Long userId, Long teamId) {
+        requireMember(teamId, userId);
+        long active = apiKeyRepository.countByTeamIdAndStatus(teamId, ApiKey.Status.ACTIVE);
+        return new ApiKeyLimitResponse(MAX_ACTIVE_KEYS, active, Math.max(0, MAX_ACTIVE_KEYS - active));
     }
 
     // @CacheEvict: 폐기한 키가 인증 캐시(TTL 30초)에 남아 최대 30초간 계속 통과하는 걸 막기 위해

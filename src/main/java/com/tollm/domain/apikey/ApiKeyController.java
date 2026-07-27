@@ -1,6 +1,7 @@
 package com.tollm.domain.apikey;
 
 import com.tollm.domain.apikey.dto.ApiKeyIssueResponse;
+import com.tollm.domain.apikey.dto.ApiKeyLimitResponse;
 import com.tollm.domain.apikey.dto.ApiKeySummary;
 import com.tollm.domain.usage.dto.UsageSummaryResponse;
 import lombok.RequiredArgsConstructor;
@@ -28,6 +29,12 @@ public class ApiKeyController {
     @GetMapping
     public List<ApiKeySummary> myKeys(@RequestAttribute("userId") Long userId) {
         return apiKeyService.myKeys(userId);
+    }
+
+    // 활성 키 [사용/최대] 안내 - 대시보드에서 "몇 개 남았는지" 표시용
+    @GetMapping("/limit")
+    public ApiKeyLimitResponse limit(@RequestAttribute("userId") Long userId) {
+        return apiKeyService.keyLimit(userId);
     }
 
     @DeleteMapping("/{id}")

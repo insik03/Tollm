@@ -123,6 +123,13 @@ public class TeamController {
         return apiKeyService.teamKeys(userId, teamId);
     }
 
+    // 팀 활성 키 [사용/최대] 안내
+    @GetMapping("/{teamId}/keys/limit")
+    public com.tollm.domain.apikey.dto.ApiKeyLimitResponse teamKeyLimit(
+            @RequestAttribute("userId") Long userId, @PathVariable Long teamId) {
+        return apiKeyService.teamKeyLimit(userId, teamId);
+    }
+
     @DeleteMapping("/{teamId}/keys/{keyId}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void revokeTeamKey(@RequestAttribute("userId") Long userId,
