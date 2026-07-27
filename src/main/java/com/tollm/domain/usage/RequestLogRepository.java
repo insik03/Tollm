@@ -1,6 +1,7 @@
 package com.tollm.domain.usage;
 
 import com.tollm.domain.usage.dto.AdminUsageSummaryResponse;
+import com.tollm.domain.usage.dto.TeamMemberUsageRow;
 import com.tollm.domain.usage.dto.TeamUsageSummaryResponse;
 import com.tollm.domain.usage.dto.UsageSummaryResponse;
 import org.springframework.data.domain.Page;
@@ -10,6 +11,7 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 import java.time.LocalDateTime;
+import java.util.List;
 
 public interface RequestLogRepository extends JpaRepository<RequestLog, Long> {
 
@@ -86,4 +88,22 @@ public interface RequestLogRepository extends JpaRepository<RequestLog, Long> {
     TeamUsageSummaryResponse aggregateByTeam(@Param("teamId") Long teamId,
                                               @Param("from") LocalDateTime from,
                                               @Param("to") LocalDateTime to);
+
+    // /teams/{id}/usage/members - 팀 사용량을 "멤버(사용자)별"로 쪼갠 집계. RequestLog.user는 팀 키
+    // 요청에서도 실제 요청한 사람으로 채워지므로(RequestLog 주석), l.user.id로 GROUP BY하면 팀 안에서
+    // 누가 얼마나 썼는지 나온다. 표시용 이메일/닉네임은 서비스가 팀 멤버 정보와 합쳐 채운다.
+    @Query("""
+            SELECT new com.tollm.domain.usage.dto.TeamMemberUsageRow(
+                l.user.id,
+                COALESCE(SUM(l.cost), 0),
+                COALESCE(SUM(l.inputTokens + l.outputTokens), 0),
+                COUNT(l)
+            )
+            FROM RequestLog l
+            WHERE l.team.id = :teamId AND l.createdAt BETWEEN :from AND :to
+            GROUP BY l.user.id
+            """)
+    List<TeamMemberUsageRow> aggregateTeamByMember(@Param("teamId") Long teamId,
+                                                   @Param("from") LocalDateTime from,
+                                                   @Param("to") LocalDateTime to);
 }

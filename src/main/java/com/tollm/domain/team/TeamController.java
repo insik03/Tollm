@@ -3,6 +3,9 @@ package com.tollm.domain.team;
 import com.tollm.domain.apikey.ApiKeyService;
 import com.tollm.domain.apikey.dto.ApiKeyIssueResponse;
 import com.tollm.domain.apikey.dto.ApiKeySummary;
+import com.tollm.domain.providerkey.ProviderKeyService;
+import com.tollm.domain.providerkey.dto.ProviderKeyRegisterRequest;
+import com.tollm.domain.providerkey.dto.ProviderKeySummary;
 import com.tollm.domain.team.dto.*;
 import com.tollm.domain.usage.dto.TeamUsageSummaryResponse;
 import com.tollm.domain.usage.dto.UsageSummaryResponse;
@@ -25,6 +28,7 @@ public class TeamController {
 
     private final TeamService teamService;
     private final ApiKeyService apiKeyService;
+    private final ProviderKeyService providerKeyService;
 
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
@@ -65,6 +69,23 @@ public class TeamController {
         return teamService.teamUsage(userId, teamId, from, to);
     }
 
+    // 팀 사용량을 멤버별로 - 누가 얼마나 썼는지(닉네임/이메일 기준)
+    @GetMapping("/{teamId}/usage/members")
+    public List<TeamMemberUsageResponse> teamMemberUsage(
+            @RequestAttribute("userId") Long userId, @PathVariable Long teamId,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime from,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime to) {
+        return teamService.teamMemberUsage(userId, teamId, from, to);
+    }
+
+    // 팀 안에서 쓸 본인 닉네임 설정
+    @PatchMapping("/{teamId}/members/me/nickname")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void setMyNickname(@RequestAttribute("userId") Long userId, @PathVariable Long teamId,
+                              @Valid @RequestBody SetNicknameRequest request) {
+        teamService.setMyNickname(userId, teamId, request.nickname());
+    }
+
     // ---- 팀 API 키 ----
     // 발급/조회/폐기 로직 자체는 ApiKeyService(팀 멤버십 검증 포함)에 위임 -
     // 이 컨트롤러는 URL 라우팅만 담당한다 (개인 키 ApiKeyController와 같은 얇은 컨트롤러 원칙)
@@ -95,5 +116,27 @@ public class TeamController {
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime from,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime to) {
         return apiKeyService.teamKeyUsage(userId, teamId, keyId, from, to);
+    }
+
+    // ---- 팀 LLM 프로바이더 키 (BYOK) ----
+    // 팀 요청은 이 팀 키로만 나간다(서버 공용키 폴백 없음). 팀원이면 등록/조회/삭제 가능.
+    @PostMapping("/{teamId}/provider-keys")
+    @ResponseStatus(HttpStatus.CREATED)
+    public ProviderKeySummary registerTeamProviderKey(@RequestAttribute("userId") Long userId,
+                                                      @PathVariable Long teamId,
+                                                      @Valid @RequestBody ProviderKeyRegisterRequest request) {
+        return providerKeyService.registerTeamKey(userId, teamId, request.provider(), request.apiKey());
+    }
+
+    @GetMapping("/{teamId}/provider-keys")
+    public List<ProviderKeySummary> teamProviderKeys(@RequestAttribute("userId") Long userId, @PathVariable Long teamId) {
+        return providerKeyService.teamKeys(userId, teamId);
+    }
+
+    @DeleteMapping("/{teamId}/provider-keys/{provider}")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void deleteTeamProviderKey(@RequestAttribute("userId") Long userId,
+                                      @PathVariable Long teamId, @PathVariable String provider) {
+        providerKeyService.deleteTeamKey(userId, teamId, provider);
     }
 }

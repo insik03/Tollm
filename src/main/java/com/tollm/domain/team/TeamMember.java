@@ -27,6 +27,9 @@ public class TeamMember {
     @Enumerated(EnumType.STRING)
     private TeamRole teamRole;
 
+    // 팀 안에서 이 멤버를 부를 이름(선택). 멤버별 사용량 표에 이메일 대신 보여주기 위함.
+    private String nickname;
+
     private LocalDateTime createdAt;
 
     @Builder
@@ -35,5 +38,9 @@ public class TeamMember {
         this.user = user;
         this.teamRole = teamRole;
         this.createdAt = LocalDateTime.now();
+    }
+
+    public void changeNickname(String nickname) {
+        this.nickname = nickname;
     }
 }

@@ -93,6 +93,7 @@ create table team_member (
     team_id bigint,
     user_id bigint,
     team_role enum ('MEMBER','OWNER'),
+    nickname varchar(255),
     primary key (id)
 ) engine=InnoDB;
 
@@ -223,3 +224,22 @@ alter table provider_credential
    add constraint FK_provider_credential_user
    foreign key (user_id)
    references users (id);
+
+-- [BYOK - 팀] 팀 공용 프로바이더 키(암호화 저장). (team_id, provider)당 1개.
+create table team_provider_credential (
+    id bigint not null auto_increment,
+    team_id bigint not null,
+    provider varchar(255) not null,
+    encrypted_key varchar(1024) not null,
+    key_preview varchar(255) not null,
+    created_at datetime(6) not null,
+    primary key (id)
+) engine=InnoDB;
+
+alter table team_provider_credential
+   add constraint uk_team_provider_credential_team_provider unique (team_id, provider);
+
+alter table team_provider_credential
+   add constraint FK_team_provider_credential_team
+   foreign key (team_id)
+   references team (id);

@@ -1,6 +1,9 @@
 package com.tollm.domain.providerkey;
 
 import com.tollm.domain.providerkey.dto.ProviderKeySummary;
+import com.tollm.domain.team.Team;
+import com.tollm.domain.team.TeamMemberRepository;
+import com.tollm.domain.team.TeamRepository;
 import com.tollm.domain.user.User;
 import com.tollm.domain.user.UserRepository;
 import com.tollm.global.auth.CryptoService;
@@ -13,7 +16,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 
-// [BYOK] 사용자 프로바이더 키 등록/조회/삭제 + 프록시가 쓸 복호화 조회.
+// [BYOK] 사용자/팀 프로바이더 키 등록/조회/삭제 + 프록시가 쓸 복호화 조회.
 // 원문 키는 등록 시점에만 받아 즉시 암호화하고, 이후 어떤 조회 API로도 원문을 돌려주지 않는다.
 @Service
 @RequiredArgsConstructor
@@ -25,6 +28,10 @@ public class ProviderKeyService {
     private final ProviderCredentialRepository repository;
     private final UserRepository userRepository;
     private final CryptoService cryptoService;
+    // 팀 BYOK(add-on) - 개인 경로는 위 3개만으로 동작
+    private final TeamProviderCredentialRepository teamProviderCredentialRepository;
+    private final TeamRepository teamRepository;
+    private final TeamMemberRepository teamMemberRepository;
 
     @Transactional
     public ProviderKeySummary register(Long userId, String provider, String rawKey) {
@@ -71,6 +78,66 @@ public class ProviderKeyService {
     public Optional<String> decryptedKeyFor(Long userId, String provider) {
         return repository.findByUserIdAndProvider(userId, provider)
                 .map(c -> cryptoService.decrypt(c.getEncryptedKey()));
+    }
+
+    // ---- 팀 BYOK (add-on) ----
+    // 팀 요청은 서버 공용키가 아니라 "팀이 등록한 키"로 나간다(검수 #9 근본 해결).
+    // 팀원이면 누구나 팀 키를 등록/조회/삭제할 수 있게 한다(팀 키 발급 정책과 동일).
+
+    @Transactional
+    public ProviderKeySummary registerTeamKey(Long userId, Long teamId, String provider, String rawKey) {
+        requireMember(teamId, userId);
+        String normalized = normalizeProvider(provider);
+        String key = rawKey == null ? "" : rawKey.trim();
+        if (key.isEmpty()) {
+            throw ApiException.badRequest("apiKey가 비어 있습니다");
+        }
+        String encrypted = cryptoService.encrypt(key);
+        String preview = mask(key);
+
+        TeamProviderCredential cred = teamProviderCredentialRepository.findByTeamIdAndProvider(teamId, normalized)
+                .map(existing -> {
+                    existing.replace(encrypted, preview);
+                    return existing;
+                })
+                .orElseGet(() -> {
+                    Team team = teamRepository.getReferenceById(teamId);
+                    return teamProviderCredentialRepository.save(TeamProviderCredential.builder()
+                            .team(team).provider(normalized)
+                            .encryptedKey(encrypted).keyPreview(preview)
+                            .build());
+                });
+        return new ProviderKeySummary(cred.getProvider(), cred.getKeyPreview(), cred.getCreatedAt());
+    }
+
+    @Transactional(readOnly = true)
+    public List<ProviderKeySummary> teamKeys(Long userId, Long teamId) {
+        requireMember(teamId, userId);
+        return teamProviderCredentialRepository.findByTeamId(teamId).stream()
+                .map(c -> new ProviderKeySummary(c.getProvider(), c.getKeyPreview(), c.getCreatedAt()))
+                .toList();
+    }
+
+    @Transactional
+    public void deleteTeamKey(Long userId, Long teamId, String provider) {
+        requireMember(teamId, userId);
+        String normalized = normalizeProvider(provider);
+        TeamProviderCredential cred = teamProviderCredentialRepository.findByTeamIdAndProvider(teamId, normalized)
+                .orElseThrow(() -> ApiException.notFound("등록된 팀 키가 없습니다"));
+        teamProviderCredentialRepository.delete(cred);
+    }
+
+    // 프록시가 팀 요청 처리 중 호출 - 팀이 등록한 키를 복호화. 없으면 empty → 호출부가 400으로 막는다.
+    @Transactional(readOnly = true)
+    public Optional<String> decryptedTeamKeyFor(Long teamId, String provider) {
+        return teamProviderCredentialRepository.findByTeamIdAndProvider(teamId, provider)
+                .map(c -> cryptoService.decrypt(c.getEncryptedKey()));
+    }
+
+    // 팀원 여부 검증 (ApiKeyService/TeamService의 requireMember와 같은 규칙)
+    private void requireMember(Long teamId, Long userId) {
+        teamMemberRepository.findByTeamIdAndUserId(teamId, userId)
+                .orElseThrow(() -> ApiException.forbidden("팀 멤버만 접근할 수 있습니다"));
     }
 
     private String normalizeProvider(String provider) {

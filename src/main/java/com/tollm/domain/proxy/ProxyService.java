@@ -27,6 +27,7 @@ import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.util.Optional;
 import java.util.concurrent.Semaphore;
 
 @Slf4j
@@ -133,7 +134,7 @@ public class ProxyService {
         LlmClient client = providerRouter.route(model);
         // [BYOK] 이 요청을 어떤 프로바이더 키로 내보낼지 결정한다. 캐시 조회 전에 먼저 확정해,
         // 키가 없으면 캐시 히트든 미스든 상관없이 즉시 "키를 등록하라"고 막는다.
-        String providerKey = resolveProviderKey(userId, isTeam, client);
+        String providerKey = resolveProviderKey(userId, teamId, client);
 
         // 팀원끼리는 캐시를 공유한다(팀 단위 buildKeyForTeam) - 개인 키는 기존과 동일하게 본인만 히트
         String cacheKey = isTeam ? responseCacheService.buildKeyForTeam(teamId, root) : responseCacheService.buildKey(userId, root);
@@ -174,28 +175,25 @@ public class ProxyService {
     }
 
     // [BYOK] 이 요청에 쓸 프로바이더 키 결정 (순수 BYOK - 서버 공용키로 폴백하지 않는다):
-    // - 개인 요청: 사용자가 등록한 키가 있으면 그걸로 나간다. 없으면 400으로 막고 "등록하라"고 안내.
-    //   운영자의 키를 모르는 사람이 대신 쓰며 비용을 태우는 걸 원천 차단하기 위함(사용자 요구사항).
-    // - 팀 요청: 팀 전용 BYOK(팀 관리창에서 팀 키 등록)는 다음 단계라, 그전까지는 서버 공용키를 쓴다.
-    private String resolveProviderKey(Long userId, boolean isTeam, LlmClient client) {
-        if (isTeam) {
-            return client.defaultApiKey(); // TODO 팀 BYOK 도입 시 팀 등록 키로 교체
-        }
+    // - 개인 요청: 사용자가 등록한 키. 없으면 400으로 막고 "등록하라"고 안내.
+    // - 팀 요청: 팀이 등록한 키. 없으면 400. (검수 #9 - 예전엔 서버 공용키를 써서, 아무나 팀을 만들면
+    //   운영자 키로 무료로 쓸 수 있는 재무적 우회가 있었다. 팀도 자기 키만 쓰게 막는다.)
+    // 어느 쪽이든 운영자 키를 모르는 사람이 대신 쓰며 비용을 태우는 걸 원천 차단한다(사용자 요구사항).
+    private String resolveProviderKey(Long userId, Long teamId, LlmClient client) {
         String provider = client.providerName();
-        String decrypted;
+        Optional<String> keyOpt;
         try {
-            // 등록된 키가 있으면 복호화, 없으면 Optional.empty() → 아래에서 "등록하라" 400
-            decrypted = providerKeyService.decryptedKeyFor(userId, provider).orElse(null);
+            keyOpt = (teamId != null)
+                    ? providerKeyService.decryptedTeamKeyFor(teamId, provider)
+                    : providerKeyService.decryptedKeyFor(userId, provider);
         } catch (IllegalStateException e) {
             // [검수 #6] 복호화 실패(마스터키 교체/암호문 손상)를 500 대신 명확한 안내로 매핑한다.
-            // 그대로 두면 IllegalStateException이 GlobalExceptionHandler의 catch-all로 가 정체불명 500이 됐다.
-            throw ApiException.badRequest(provider + " 키를 복호화할 수 없습니다. 대시보드에서 키를 다시 등록해주세요");
+            throw ApiException.badRequest((teamId != null ? "팀 " : "") + provider
+                    + " 키를 복호화할 수 없습니다. 키를 다시 등록해주세요");
         }
-        if (decrypted == null) {
-            throw ApiException.badRequest(
-                    provider + " 키가 등록되어 있지 않습니다. 대시보드 '내 LLM 키'에서 먼저 등록해주세요");
-        }
-        return decrypted;
+        return keyOpt.orElseThrow(() -> ApiException.badRequest(teamId != null
+                ? provider + " 팀 키가 등록되어 있지 않습니다. 팀 관리에서 팀 LLM 키를 먼저 등록해주세요"
+                : provider + " 키가 등록되어 있지 않습니다. 대시보드 '내 LLM 키'에서 먼저 등록해주세요"));
     }
 
     // 월 리셋(resetAt 도래) 지연 평가: 배치/스케줄러 없이 요청 시점에 확인 후 필요하면 즉시 리셋한다.

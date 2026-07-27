@@ -258,8 +258,8 @@ class ProxyServiceTest {
         given(llmClient.providerName()).willReturn("openai");
         given(responseCacheService.buildKeyForTeam(eq(TEAM_ID), any())).willReturn("cache:team-key");
         given(responseCacheService.get("cache:team-key")).willReturn(null);
-        given(llmClient.defaultApiKey()).willReturn("sk-server"); // 팀 요청은 (팀 BYOK 전까지) 서버 공용키 사용
-        given(llmClient.chat(eq(BODY), eq("sk-server"))).willReturn("{\"usage\":{\"prompt_tokens\":100,\"completion_tokens\":50}}");
+        given(providerKeyService.decryptedTeamKeyFor(TEAM_ID, "openai")).willReturn(Optional.of("sk-team")); // 팀 BYOK: 팀 등록 키
+        given(llmClient.chat(eq(BODY), eq("sk-team"))).willReturn("{\"usage\":{\"prompt_tokens\":100,\"completion_tokens\":50}}");
         given(llmModelRepository.findByName("gpt-4o-mini")).willReturn(Optional.of(registeredModel()));
         given(userRepository.getReferenceById(USER_ID)).willReturn(mock(User.class));
         given(teamRepository.getReferenceById(TEAM_ID)).willReturn(mock(Team.class));
@@ -285,7 +285,7 @@ class ProxyServiceTest {
         given(responseCacheService.get("cache:team-key")).willReturn("{\"cached\":true}");
         given(userRepository.getReferenceById(USER_ID)).willReturn(mock(User.class));
         given(teamRepository.getReferenceById(TEAM_ID)).willReturn(mock(Team.class));
-        given(llmClient.defaultApiKey()).willReturn("sk-server"); // 팀 요청 키 결정 시 호출됨(캐시 히트라 chat은 안 함)
+        given(providerKeyService.decryptedTeamKeyFor(TEAM_ID, "openai")).willReturn(Optional.of("sk-team")); // 팀 키 결정 시 호출(캐시 히트라 chat은 안 함)
 
         String result = proxyService.relay(USER_ID, TEAM_ID, BODY);
 

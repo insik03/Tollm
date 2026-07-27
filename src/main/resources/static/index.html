@@ -224,8 +224,12 @@
 
         <div class="card">
           <h2>팀원 목록</h2>
+          <div class="btn-row">
+            <input id="myNickname" placeholder="이 팀에서 쓸 내 닉네임" style="max-width:240px">
+            <button class="btn-outline" onclick="setMyNickname()">내 닉네임 설정</button>
+          </div>
           <table>
-            <thead><tr><th>이메일</th><th>역할</th><th>합류일</th></tr></thead>
+            <thead><tr><th>이메일</th><th>닉네임</th><th>역할</th><th>합류일</th></tr></thead>
             <tbody id="membersTable"></tbody>
           </table>
         </div>
@@ -241,6 +245,24 @@
         </div>
 
         <div class="card">
+          <h2>팀 LLM 키 (BYOK)</h2>
+          <p class="hint">팀 키(tlm_...)로 보낸 요청은 <b>이 팀이 등록한 LLM 키</b>로 나갑니다. 등록 안 하면 팀 채팅이 막혀요.
+            비용은 이 팀 키의 소유 계정으로 청구됩니다. 팀원이면 등록/삭제할 수 있고, 원문은 저장 후 다시 표시되지 않습니다.</p>
+          <div class="btn-row">
+            <select id="teamByokProvider" style="max-width:180px">
+              <option value="openai">openai</option>
+              <option value="anthropic">anthropic</option>
+            </select>
+            <input id="teamByokKey" placeholder="sk-... 또는 sk-ant-..." style="flex:1">
+            <button class="btn-primary" onclick="registerTeamProviderKey()">등록</button>
+          </div>
+          <table>
+            <thead><tr><th>프로바이더</th><th>키(마스킹)</th><th>등록일</th><th></th></tr></thead>
+            <tbody id="teamByokTable"></tbody>
+          </table>
+        </div>
+
+        <div class="card">
           <h2>팀 API 키</h2>
           <div class="btn-row"><button class="btn-primary" onclick="issueTeamKey()">새 팀 키 발급</button></div>
           <div id="teamKeyReveal"></div>
@@ -249,6 +271,15 @@
           <table>
             <thead><tr><th>Prefix</th><th>상태</th><th>발급일</th><th>사용량</th><th></th></tr></thead>
             <tbody id="teamKeysTable"></tbody>
+          </table>
+        </div>
+
+        <div class="card">
+          <h2>멤버별 사용량 <button class="btn-outline" style="margin-left:auto;padding:4px 10px;font-size:12px" onclick="loadTeamMemberUsage()">새로고침</button></h2>
+          <p class="hint">이 팀 키로 누가 얼마나 썼는지 - 닉네임(없으면 이메일) 기준. 최근 한 달.</p>
+          <table>
+            <thead><tr><th>멤버</th><th>비용(USD)</th><th>토큰</th><th>요청 수</th></tr></thead>
+            <tbody id="teamMemberUsageTable"></tbody>
           </table>
         </div>
       </div>
@@ -531,6 +562,55 @@ function onTeamSelect() {
   loadMembers();
   loadTeamUsage();
   loadTeamKeys();
+  loadTeamProviderKeys();
+  loadTeamMemberUsage();
+}
+
+// ---- 팀 BYOK: 팀 LLM 프로바이더 키 ----
+async function loadTeamProviderKeys() {
+  if (!currentTeamId) return;
+  const r = await api(`/teams/${currentTeamId}/provider-keys`);
+  if (r.status !== 200) return;
+  document.getElementById('teamByokTable').innerHTML = r.data.map(k => `
+    <tr>
+      <td>${k.provider}</td>
+      <td><code>${escapeHtml(k.keyPreview)}</code></td>
+      <td>${(k.registeredAt || '').replace('T', ' ').slice(0, 19)}</td>
+      <td><button class="btn-danger" onclick="deleteTeamProviderKey('${k.provider}')">삭제</button></td>
+    </tr>`).join('') || '<tr><td colspan="4" style="color:#9ca3af">등록된 팀 LLM 키가 없습니다 - 등록해야 팀 채팅을 쓸 수 있어요</td></tr>';
+}
+
+async function registerTeamProviderKey() {
+  if (!currentTeamId) return;
+  const provider = document.getElementById('teamByokProvider').value;
+  const apiKey = document.getElementById('teamByokKey').value.trim();
+  if (!apiKey) { toast('키를 입력하세요'); return; }
+  const r = await api(`/teams/${currentTeamId}/provider-keys`, { method: 'POST', body: { provider, apiKey } });
+  if (r.status === 201) {
+    toast(`팀 ${provider} 키를 등록했습니다`);
+    document.getElementById('teamByokKey').value = '';
+    loadTeamProviderKeys();
+  } else toast('등록 실패: ' + (r.data?.message || r.status));
+}
+
+async function deleteTeamProviderKey(provider) {
+  const r = await api(`/teams/${currentTeamId}/provider-keys/${encodeURIComponent(provider)}`, { method: 'DELETE' });
+  if (r.status === 204) { toast(`팀 ${provider} 키를 삭제했습니다`); loadTeamProviderKeys(); }
+  else toast('삭제 실패: ' + (r.data?.message || r.status));
+}
+
+// ---- 팀 멤버별 사용량 ----
+async function loadTeamMemberUsage() {
+  if (!currentTeamId) return;
+  const r = await api(`/teams/${currentTeamId}/usage/members`);
+  if (r.status !== 200) return;
+  document.getElementById('teamMemberUsageTable').innerHTML = r.data.map(m => `
+    <tr>
+      <td>${escapeHtml(m.displayName)}</td>
+      <td>$${Number(m.totalCost || 0).toFixed(4)}</td>
+      <td>${m.totalTokens ?? 0}</td>
+      <td>${m.requestCount ?? 0}</td>
+    </tr>`).join('') || '<tr><td colspan="4" style="color:#9ca3af">사용 기록이 없습니다</td></tr>';
 }
 
 async function createTeam() {
@@ -574,9 +654,18 @@ async function loadMembers() {
   document.getElementById('membersTable').innerHTML = r.data.map(m => `
     <tr>
       <td>${escapeHtml(m.email)}</td>
+      <td>${escapeHtml(m.nickname || '-')}</td>
       <td><span class="badge ${m.role === 'OWNER' ? 'badge-ok' : 'badge-off'}">${m.role}</span></td>
       <td>${(m.joinedAt || '').replace('T', ' ').slice(0, 19)}</td>
     </tr>`).join('');
+}
+
+async function setMyNickname() {
+  if (!currentTeamId) return;
+  const nickname = document.getElementById('myNickname').value.trim();
+  const r = await api(`/teams/${currentTeamId}/members/me/nickname`, { method: 'PATCH', body: { nickname } });
+  if (r.status === 204) { toast('닉네임을 설정했습니다'); loadMembers(); loadTeamMemberUsage(); }
+  else toast('설정 실패: ' + (r.data?.message || r.status));
 }
 
 async function loadTeamUsage() {

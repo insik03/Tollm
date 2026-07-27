@@ -2,6 +2,7 @@ package com.tollm.domain.team;
 
 import com.tollm.domain.team.dto.*;
 import com.tollm.domain.usage.RequestLogRepository;
+import com.tollm.domain.usage.dto.TeamMemberUsageRow;
 import com.tollm.domain.usage.dto.TeamUsageSummaryResponse;
 import com.tollm.domain.user.User;
 import com.tollm.domain.user.UserRepository;
@@ -10,10 +11,13 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.math.BigDecimal;
 import java.security.SecureRandom;
 import java.time.LocalDateTime;
 import java.util.Base64;
 import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
@@ -113,6 +117,41 @@ public class TeamService {
             throw ApiException.badRequest("from은 to보다 이전이어야 합니다");
         }
         return requestLogRepository.aggregateByTeam(teamId, effectiveFrom, effectiveTo);
+    }
+
+    // 본인이 이 팀에서 쓸 닉네임 설정(멤버별 사용량 표에 이메일 대신 표시). 빈 값이면 해제.
+    @Transactional
+    public void setMyNickname(Long userId, Long teamId, String nickname) {
+        TeamMember member = requireMember(teamId, userId);
+        String trimmed = (nickname == null || nickname.isBlank()) ? null : nickname.trim();
+        member.changeNickname(trimmed); // dirty checking으로 커밋 시 UPDATE
+    }
+
+    // /teams/{id}/usage/members - 팀 사용량을 멤버별로 쪼갠다. 로그 집계(사용자별)를 팀 멤버 목록과
+    // 합쳐 displayName(닉네임 없으면 이메일)을 채운다. 사용 기록이 없는 멤버도 0으로 포함한다.
+    @Transactional(readOnly = true)
+    public List<TeamMemberUsageResponse> teamMemberUsage(Long userId, Long teamId,
+                                                         LocalDateTime from, LocalDateTime to) {
+        requireMember(teamId, userId);
+        LocalDateTime effectiveFrom = from != null ? from : LocalDateTime.now().minusMonths(1);
+        LocalDateTime effectiveTo = to != null ? to : LocalDateTime.now();
+        if (effectiveFrom.isAfter(effectiveTo)) {
+            throw ApiException.badRequest("from은 to보다 이전이어야 합니다");
+        }
+        Map<Long, TeamMemberUsageRow> byUser = requestLogRepository
+                .aggregateTeamByMember(teamId, effectiveFrom, effectiveTo).stream()
+                .collect(Collectors.toMap(TeamMemberUsageRow::userId, r -> r));
+
+        return teamMemberRepository.findByTeamId(teamId).stream().map(m -> {
+            Long uid = m.getUser().getId();
+            String displayName = (m.getNickname() != null && !m.getNickname().isBlank())
+                    ? m.getNickname() : m.getUser().getEmail();
+            TeamMemberUsageRow row = byUser.get(uid);
+            return new TeamMemberUsageResponse(uid, displayName,
+                    row != null ? row.totalCost() : BigDecimal.ZERO,
+                    row != null ? row.totalTokens() : 0L,
+                    row != null ? row.requestCount() : 0L);
+        }).toList();
     }
 
     private TeamMember requireMember(Long teamId, Long userId) {
