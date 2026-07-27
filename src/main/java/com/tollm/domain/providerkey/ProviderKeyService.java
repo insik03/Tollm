@@ -66,7 +66,7 @@ public class ProviderKeyService {
     }
 
     // 프록시가 요청 처리 중 호출: 이 사용자가 해당 프로바이더 키를 등록했으면 복호화해서 반환.
-    // 없으면 Optional.empty() → 호출부(ProxyService)가 서버 공용키로 폴백한다.
+    // 없으면 Optional.empty() → 호출부(ProxyService)가 400으로 막고 "등록하라"고 안내한다(서버키 폴백 없음).
     @Transactional(readOnly = true)
     public Optional<String> decryptedKeyFor(Long userId, String provider) {
         return repository.findByUserIdAndProvider(userId, provider)

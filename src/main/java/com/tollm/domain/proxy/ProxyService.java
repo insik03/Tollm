@@ -181,9 +181,21 @@ public class ProxyService {
         if (isTeam) {
             return client.defaultApiKey(); // TODO 팀 BYOK 도입 시 팀 등록 키로 교체
         }
-        return providerKeyService.decryptedKeyFor(userId, client.providerName())
-                .orElseThrow(() -> ApiException.badRequest(
-                        client.providerName() + " 키가 등록되어 있지 않습니다. 대시보드 '내 LLM 키'에서 먼저 등록해주세요"));
+        String provider = client.providerName();
+        String decrypted;
+        try {
+            // 등록된 키가 있으면 복호화, 없으면 Optional.empty() → 아래에서 "등록하라" 400
+            decrypted = providerKeyService.decryptedKeyFor(userId, provider).orElse(null);
+        } catch (IllegalStateException e) {
+            // [검수 #6] 복호화 실패(마스터키 교체/암호문 손상)를 500 대신 명확한 안내로 매핑한다.
+            // 그대로 두면 IllegalStateException이 GlobalExceptionHandler의 catch-all로 가 정체불명 500이 됐다.
+            throw ApiException.badRequest(provider + " 키를 복호화할 수 없습니다. 대시보드에서 키를 다시 등록해주세요");
+        }
+        if (decrypted == null) {
+            throw ApiException.badRequest(
+                    provider + " 키가 등록되어 있지 않습니다. 대시보드 '내 LLM 키'에서 먼저 등록해주세요");
+        }
+        return decrypted;
     }
 
     // 월 리셋(resetAt 도래) 지연 평가: 배치/스케줄러 없이 요청 시점에 확인 후 필요하면 즉시 리셋한다.

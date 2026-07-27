@@ -30,8 +30,16 @@ public class CryptoService {
     private final SecretKeySpec key;
     private final SecureRandom random = new SecureRandom();
 
+    private static final int MIN_SECRET_LENGTH = 32; // [검수 #2] 저엔트로피 비밀 방지용 최소 길이
+
     public CryptoService(TollmProperties properties) {
         String secret = properties.getSecurity().getByokEncryptionKey();
+        // [검수 #2] SHA-256은 salt/work-factor가 없어, 짧고 추측 쉬운 비밀이면 DB 유출 시 오프라인
+        // 무차별 대입에 약하다. 최소 길이를 부팅 시점에 강제해(fail-fast) 약한 마스터키 사용을 막는다.
+        if (secret == null || secret.length() < MIN_SECRET_LENGTH) {
+            throw new IllegalStateException(
+                    "BYOK 암호화 키(byok-encryption-key)는 최소 " + MIN_SECRET_LENGTH + "자 이상이어야 합니다");
+        }
         this.key = new SecretKeySpec(sha256(secret), "AES");
     }
 
