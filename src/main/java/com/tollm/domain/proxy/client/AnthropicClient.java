@@ -20,7 +20,7 @@ import org.springframework.web.client.RestClientResponseException;
 public class AnthropicClient implements LlmClient {
 
     private final RestClient restClient;
-    private final String apiKey;
+    private final String serverApiKey; // 설정으로 주입된 서버 공용키 (BYOK 미등록 사용자 폴백용)
     private final ObjectMapper objectMapper;
 
     public AnthropicClient(TollmProperties properties, ClientHttpRequestFactory llmRequestFactory,
@@ -30,7 +30,7 @@ public class AnthropicClient implements LlmClient {
                 .baseUrl(p.getBaseUrl())
                 .requestFactory(llmRequestFactory)
                 .build();
-        this.apiKey = p.getApiKey();
+        this.serverApiKey = p.getApiKey();
         this.objectMapper = objectMapper;
     }
 
@@ -40,7 +40,12 @@ public class AnthropicClient implements LlmClient {
     }
 
     @Override
-    public String chat(String openAiFormatJson) {
+    public String defaultApiKey() {
+        return serverApiKey;
+    }
+
+    @Override
+    public String chat(String openAiFormatJson, String apiKey) {
         try {
             String anthropicRequest = toAnthropicRequest(openAiFormatJson);
             String anthropicResponse = restClient.post()

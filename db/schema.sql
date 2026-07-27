@@ -204,3 +204,22 @@ alter table usage_quota
    add constraint FKmn46g2samy6cf1m0oqaxwx4kt
    foreign key (user_id)
    references users (id);
+
+-- [BYOK] 사용자가 등록한 프로바이더 키(암호화 저장). (user_id, provider)당 1개.
+create table provider_credential (
+    id bigint not null auto_increment,
+    user_id bigint not null,
+    provider varchar(255) not null,
+    encrypted_key varchar(1024) not null,
+    key_preview varchar(255) not null,
+    created_at datetime(6) not null,
+    primary key (id)
+) engine=InnoDB;
+
+alter table provider_credential
+   add constraint uk_provider_credential_user_provider unique (user_id, provider);
+
+alter table provider_credential
+   add constraint FK_provider_credential_user
+   foreign key (user_id)
+   references users (id);

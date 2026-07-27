@@ -51,6 +51,10 @@ tollm:
     ttl-seconds: 3600   # exact 캐시 TTL (1시간, 근거는 TollmProperties.Cache 주석 참고)
   proxy:
     max-request-body-bytes: 1048576   # [보안 수정 SEC-02] /v1/** 요청 본문 상한 1MB - 초과 시 413
+  security:
+    # [BYOK] 사용자 프로바이더 키 암호화용 비밀. 로컬은 편의 기본값, 운영은 아래 prod에서 환경변수 강제.
+    # 이 값이 바뀌면 기존에 저장된 사용자 키 암호문을 복호화할 수 없게 되니 운영에서 함부로 바꾸지 말 것.
+    byok-encryption-key: ${BYOK_ENCRYPTION_KEY:local-dev-byok-key-do-not-use-in-prod}
 
 --- # ===== local: 로컬 개발 전용 (docker-compose 기준) =====
 spring:
@@ -102,3 +106,5 @@ tollm:
       api-key: ${OPENAI_API_KEY}
     anthropic:
       api-key: ${ANTHROPIC_API_KEY}
+  security:
+    byok-encryption-key: ${BYOK_ENCRYPTION_KEY}   # 운영은 반드시 환경변수 (없으면 부팅 실패)

@@ -21,6 +21,16 @@ public class TollmProperties {
     private RateLimit rateLimit = new RateLimit();
     private Cache cache = new Cache();
     private Proxy proxy = new Proxy();
+    private Security security = new Security();
+
+    // [BYOK] 사용자 프로바이더 키 암호화용 설정
+    @Getter
+    @Setter
+    public static class Security {
+        // 사용자 등록 키(sk-...)를 AES-GCM으로 암호화할 때 쓰는 비밀. prod에서는 반드시 환경변수로
+        // 주입한다(fail-fast). 이 값이 바뀌면 기존에 저장된 암호문을 복호화할 수 없게 되니 주의.
+        private String byokEncryptionKey;
+    }
 
     @Getter
     @Setter

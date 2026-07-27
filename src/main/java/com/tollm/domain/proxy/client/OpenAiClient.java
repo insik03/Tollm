@@ -9,12 +9,12 @@ import org.springframework.web.client.ResourceAccessException;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientResponseException;
 
-// OpenAI는 우리 API와 형식이 같으므로 "통과(passthrough)" — 키만 서버 것으로 바꿔 전달
+// OpenAI는 우리 API와 형식이 같으므로 "통과(passthrough)" — 키만 바꿔 전달
 @Component
 public class OpenAiClient implements LlmClient {
 
     private final RestClient restClient;
-    private final String apiKey;
+    private final String serverApiKey; // 설정으로 주입된 서버 공용키 (BYOK 미등록 사용자 폴백용)
 
     public OpenAiClient(TollmProperties properties, ClientHttpRequestFactory llmRequestFactory) {
         TollmProperties.Provider p = properties.getProviders().get("openai");
@@ -22,7 +22,7 @@ public class OpenAiClient implements LlmClient {
                 .baseUrl(p.getBaseUrl())
                 .requestFactory(llmRequestFactory)
                 .build();
-        this.apiKey = p.getApiKey();
+        this.serverApiKey = p.getApiKey();
     }
 
     @Override
@@ -31,11 +31,16 @@ public class OpenAiClient implements LlmClient {
     }
 
     @Override
-    public String chat(String openAiFormatJson) {
+    public String defaultApiKey() {
+        return serverApiKey;
+    }
+
+    @Override
+    public String chat(String openAiFormatJson, String apiKey) {
         try {
             return restClient.post()
                     .uri("/v1/chat/completions")
-                    .header("Authorization", "Bearer " + apiKey) // 클라이언트의 tlm_ 키가 아니라 서버가 보관한 원본 키
+                    .header("Authorization", "Bearer " + apiKey) // 클라이언트의 tlm_ 키가 아니라 서버/사용자가 보관한 원본 키
                     .contentType(MediaType.APPLICATION_JSON)
                     .body(openAiFormatJson)
                     .retrieve()

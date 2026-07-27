@@ -21,7 +21,7 @@ import java.util.List;
 public class JwtAuthFilter extends OncePerRequestFilter {
 
     private static final List<String> PROTECTED_PREFIXES =
-            List.of("/keys", "/usage", "/teams", "/admin");
+            List.of("/keys", "/usage", "/teams", "/admin", "/provider-keys");
 
     // [보안 수정] getRequestURI()는 퍼센트 인코딩을 "디코딩하지 않은" 원문을 돌려주는 반면,
     // Spring MVC는 디코딩된 경로(/admin)로 컨트롤러를 매핑한다. 두 경로가 어긋나면

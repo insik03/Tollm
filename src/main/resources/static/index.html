@@ -116,6 +116,25 @@
           <tbody id="keysTable"></tbody>
         </table>
       </div>
+
+      <div class="card">
+        <h2>내 LLM 키 (BYOK)</h2>
+        <p class="hint">Tollm은 <b>본인이 등록한 LLM 프로바이더 키로만</b> 요청을 내보냅니다. 키를 등록하지 않으면
+          채팅 테스트가 "키를 등록하라"며 막혀요. 비용은 각자 본인 OpenAI/Anthropic 계정으로 청구됩니다.
+          등록한 키는 암호화되어 저장되고, 이 화면엔 마스킹된 일부만 보입니다(원문은 다시 표시되지 않음).</p>
+        <div class="btn-row">
+          <select id="byokProvider" style="max-width:200px">
+            <option value="openai">openai (gpt-*)</option>
+            <option value="anthropic">anthropic (claude-*)</option>
+          </select>
+          <input id="byokKey" placeholder="sk-... 또는 sk-ant-..." style="flex:1">
+          <button class="btn-primary" onclick="registerProviderKey()">등록</button>
+        </div>
+        <table>
+          <thead><tr><th>프로바이더</th><th>키(마스킹)</th><th>등록일</th><th></th></tr></thead>
+          <tbody id="byokTable"></tbody>
+        </table>
+      </div>
     </div>
 
     <!-- 사용량 -->
@@ -290,7 +309,7 @@ function switchPanel(id) {
   document.querySelectorAll('#appArea .tab').forEach(t => t.classList.toggle('active', t.dataset.panel === id));
   document.querySelectorAll('.panel').forEach(p => p.classList.toggle('hidden', p.id !== id));
   if (id === 'usagePanel') loadUsage();
-  if (id === 'keysPanel') loadKeys();
+  if (id === 'keysPanel') { loadKeys(); loadProviderKeys(); }
   if (id === 'teamPanel') loadMyTeams();
 }
 
@@ -343,6 +362,38 @@ function enterApp() {
   document.getElementById('userBar').style.display = 'flex';
   document.getElementById('userEmail').textContent = email;
   loadKeys();
+  loadProviderKeys();
+}
+
+// ---- BYOK: 내 LLM 프로바이더 키 ----
+async function loadProviderKeys() {
+  const r = await api('/provider-keys');
+  if (r.status !== 200) return;
+  document.getElementById('byokTable').innerHTML = r.data.map(k => `
+    <tr>
+      <td>${k.provider}</td>
+      <td><code>${escapeHtml(k.keyPreview)}</code></td>
+      <td>${(k.registeredAt || '').replace('T', ' ').slice(0, 19)}</td>
+      <td><button class="btn-danger" onclick="deleteProviderKey('${k.provider}')">삭제</button></td>
+    </tr>`).join('') || '<tr><td colspan="4" style="color:#9ca3af">등록된 LLM 키가 없습니다 - 등록해야 채팅을 쓸 수 있어요</td></tr>';
+}
+
+async function registerProviderKey() {
+  const provider = document.getElementById('byokProvider').value;
+  const apiKey = document.getElementById('byokKey').value.trim();
+  if (!apiKey) { toast('키를 입력하세요'); return; }
+  const r = await api('/provider-keys', { method: 'POST', body: { provider, apiKey } });
+  if (r.status === 201) {
+    toast(`${provider} 키를 등록했습니다`);
+    document.getElementById('byokKey').value = '';  // 입력창에 원문 안 남기기
+    loadProviderKeys();
+  } else toast('등록 실패: ' + (r.data?.message || r.status));
+}
+
+async function deleteProviderKey(provider) {
+  const r = await api('/provider-keys/' + encodeURIComponent(provider), { method: 'DELETE' });
+  if (r.status === 204) { toast(`${provider} 키를 삭제했습니다`); loadProviderKeys(); }
+  else toast('삭제 실패: ' + (r.data?.message || r.status));
 }
 
 // ---- API 키 ----

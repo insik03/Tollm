@@ -13,6 +13,7 @@ import com.tollm.domain.team.TeamUsageQuotaRepository;
 import com.tollm.domain.usage.RequestLogRepository;
 import com.tollm.domain.usage.UsageQuota;
 import com.tollm.domain.usage.UsageQuotaRepository;
+import com.tollm.domain.providerkey.ProviderKeyService;
 import com.tollm.domain.user.Role;
 import com.tollm.domain.user.User;
 import com.tollm.domain.user.UserRepository;
@@ -53,6 +54,7 @@ class ProxyServiceTest {
     @Mock private TeamUsageQuotaRepository teamUsageQuotaRepository;
     @Mock private TeamRepository teamRepository;
     @Mock private ApiKeyRepository apiKeyRepository;
+    @Mock private ProviderKeyService providerKeyService;
 
     private ProxyService proxyService;
 
@@ -66,7 +68,7 @@ class ProxyServiceTest {
         proxyService = new ProxyService(providerRouter, new ObjectMapper(), rateLimitService,
                 responseCacheService, usageQuotaRepository, requestLogRepository,
                 llmModelRepository, userRepository, teamUsageQuotaRepository, teamRepository, apiKeyRepository,
-                new TollmProperties());
+                new TollmProperties(), providerKeyService);
         // @PostConstruct는 Spring 컨텍스트에서만 자동 실행되므로, 단위 테스트에서는 직접 호출해
         // 격벽 세마포어(기본 100 permit)를 초기화한다
         proxyService.initBulkhead();
@@ -138,11 +140,12 @@ class ProxyServiceTest {
         given(responseCacheService.buildKey(eq(USER_ID), any())).willReturn("cache:key");
         given(responseCacheService.get("cache:key")).willReturn("{\"cached\":true}");
         given(userRepository.getReferenceById(USER_ID)).willReturn(mock(User.class));
+        given(providerKeyService.decryptedKeyFor(USER_ID, "openai")).willReturn(Optional.of("sk-user")); // BYOK: 등록된 키
 
         String result = proxyService.relay(USER_ID, BODY);
 
         assertThat(result).isEqualTo("{\"cached\":true}");
-        verify(llmClient, never()).chat(anyString());
+        verify(llmClient, never()).chat(anyString(), anyString());
         verify(requestLogRepository).save(argThat(log -> log.isCacheHit() && log.getCost().signum() == 0));
         verify(usageQuotaRepository, never()).addUsage(any(), any());
         verify(responseCacheService, never()).put(anyString(), anyString());
@@ -156,7 +159,8 @@ class ProxyServiceTest {
         given(llmClient.providerName()).willReturn("openai");
         given(responseCacheService.buildKey(eq(USER_ID), any())).willReturn("cache:key");
         given(responseCacheService.get("cache:key")).willReturn(null);
-        given(llmClient.chat(BODY)).willReturn("{\"usage\":{\"prompt_tokens\":100,\"completion_tokens\":50}}");
+        given(providerKeyService.decryptedKeyFor(USER_ID, "openai")).willReturn(Optional.of("sk-user")); // BYOK: 등록된 키
+        given(llmClient.chat(eq(BODY), eq("sk-user"))).willReturn("{\"usage\":{\"prompt_tokens\":100,\"completion_tokens\":50}}");
         given(llmModelRepository.findByName("gpt-4o-mini")).willReturn(Optional.of(registeredModel()));
         given(userRepository.getReferenceById(USER_ID)).willReturn(mock(User.class));
 
@@ -185,6 +189,25 @@ class ProxyServiceTest {
 
         verifyNoInteractions(providerRouter, responseCacheService, llmClient, requestLogRepository);
         verify(usageQuotaRepository, never()).addUsage(any(), any());
+    }
+
+    // [BYOK] 순수 BYOK: 사용자가 프로바이더 키를 등록하지 않았으면 서버 공용키로 폴백하지 않고
+    // 400으로 막는다("등록하라"). 운영자 키를 모르는 사람이 대신 쓰며 비용을 태우는 걸 차단.
+    @Test
+    void BYOK_키_미등록_개인요청은_400으로_막히고_외부호출되지_않는다() {
+        given(rateLimitService.tryConsume(USER_ID)).willReturn(true);
+        given(usageQuotaRepository.findByUserId(USER_ID)).willReturn(Optional.of(quotaWithLimit(BigDecimal.TEN)));
+        given(llmModelRepository.findByName("gpt-4o-mini")).willReturn(Optional.of(registeredModel()));
+        given(providerRouter.route("gpt-4o-mini")).willReturn(llmClient);
+        given(llmClient.providerName()).willReturn("openai");
+        given(providerKeyService.decryptedKeyFor(USER_ID, "openai")).willReturn(Optional.empty()); // 미등록
+
+        assertThatThrownBy(() -> proxyService.relay(USER_ID, BODY))
+                .isInstanceOf(ApiException.class)
+                .satisfies(e -> assertThat(((ApiException) e).getStatus().value()).isEqualTo(400));
+
+        verify(llmClient, never()).chat(anyString(), anyString());
+        verify(responseCacheService, never()).get(anyString());
     }
 
     @Test
@@ -235,7 +258,8 @@ class ProxyServiceTest {
         given(llmClient.providerName()).willReturn("openai");
         given(responseCacheService.buildKeyForTeam(eq(TEAM_ID), any())).willReturn("cache:team-key");
         given(responseCacheService.get("cache:team-key")).willReturn(null);
-        given(llmClient.chat(BODY)).willReturn("{\"usage\":{\"prompt_tokens\":100,\"completion_tokens\":50}}");
+        given(llmClient.defaultApiKey()).willReturn("sk-server"); // 팀 요청은 (팀 BYOK 전까지) 서버 공용키 사용
+        given(llmClient.chat(eq(BODY), eq("sk-server"))).willReturn("{\"usage\":{\"prompt_tokens\":100,\"completion_tokens\":50}}");
         given(llmModelRepository.findByName("gpt-4o-mini")).willReturn(Optional.of(registeredModel()));
         given(userRepository.getReferenceById(USER_ID)).willReturn(mock(User.class));
         given(teamRepository.getReferenceById(TEAM_ID)).willReturn(mock(Team.class));
@@ -261,11 +285,12 @@ class ProxyServiceTest {
         given(responseCacheService.get("cache:team-key")).willReturn("{\"cached\":true}");
         given(userRepository.getReferenceById(USER_ID)).willReturn(mock(User.class));
         given(teamRepository.getReferenceById(TEAM_ID)).willReturn(mock(Team.class));
+        given(llmClient.defaultApiKey()).willReturn("sk-server"); // 팀 요청 키 결정 시 호출됨(캐시 히트라 chat은 안 함)
 
         String result = proxyService.relay(USER_ID, TEAM_ID, BODY);
 
         assertThat(result).isEqualTo("{\"cached\":true}");
-        verify(llmClient, never()).chat(anyString());
+        verify(llmClient, never()).chat(anyString(), anyString());
         verify(teamUsageQuotaRepository, never()).addUsage(any(), any());
     }
 }
