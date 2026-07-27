@@ -38,15 +38,19 @@ public class ProviderCredential {
     @Column(nullable = false)
     private String keyPreview; // 표시용 마스킹 (예: "sk-proj...wXaM")
 
+    // 사용자가 붙이는 별명(선택). 어느 계정/용도의 키인지 알아보기 위함 (예: "회사 OpenAI")
+    private String label;
+
     @Column(nullable = false)
     private LocalDateTime createdAt;
 
     @Builder
-    public ProviderCredential(User user, String provider, String encryptedKey, String keyPreview) {
+    public ProviderCredential(User user, String provider, String encryptedKey, String keyPreview, String label) {
         this.user = user;
         this.provider = provider;
         this.encryptedKey = encryptedKey;
         this.keyPreview = keyPreview;
+        this.label = label;
     }
 
     @PrePersist
@@ -55,9 +59,10 @@ public class ProviderCredential {
     }
 
     // 키를 다시 등록하면 기존 행을 교체(update)한다 - 행이 늘어나지 않게
-    public void replace(String encryptedKey, String keyPreview) {
+    public void replace(String encryptedKey, String keyPreview, String label) {
         this.encryptedKey = encryptedKey;
         this.keyPreview = keyPreview;
+        this.label = label;
         this.createdAt = LocalDateTime.now();
     }
 }

@@ -15,16 +15,12 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 import java.util.Optional;
-import java.util.Set;
 
 // [BYOK] 사용자/팀 프로바이더 키 등록/조회/삭제 + 프록시가 쓸 복호화 조회.
 // 원문 키는 등록 시점에만 받아 즉시 암호화하고, 이후 어떤 조회 API로도 원문을 돌려주지 않는다.
 @Service
 @RequiredArgsConstructor
 public class ProviderKeyService {
-
-    // 우리가 라우팅을 지원하는 프로바이더만 등록 허용 (ProviderRouter와 일치)
-    private static final Set<String> SUPPORTED = Set.of("openai", "anthropic");
 
     private final ProviderCredentialRepository repository;
     private final UserRepository userRepository;
@@ -35,7 +31,7 @@ public class ProviderKeyService {
     private final TeamMemberRepository teamMemberRepository;
 
     @Transactional
-    public ProviderKeySummary register(Long userId, String provider, String rawKey) {
+    public ProviderKeySummary register(Long userId, String provider, String rawKey, String label) {
         String normalized = normalizeProvider(provider);
         String key = rawKey == null ? "" : rawKey.trim();
         if (key.isEmpty()) {
@@ -43,18 +39,19 @@ public class ProviderKeyService {
         }
         String encrypted = cryptoService.encrypt(key);
         String preview = mask(key);
+        String cleanLabel = (label == null || label.isBlank()) ? null : label.trim();
 
         // 이미 있으면 교체(update), 없으면 새로 생성 - (user, provider)당 1개 유지
         ProviderCredential cred = repository.findByUserIdAndProvider(userId, normalized)
                 .map(existing -> {
-                    existing.replace(encrypted, preview);
+                    existing.replace(encrypted, preview, cleanLabel);
                     return existing;
                 })
                 .orElseGet(() -> {
                     User user = userRepository.getReferenceById(userId); // FK만 필요
                     return repository.save(ProviderCredential.builder()
                             .user(user).provider(normalized)
-                            .encryptedKey(encrypted).keyPreview(preview)
+                            .encryptedKey(encrypted).keyPreview(preview).label(cleanLabel)
                             .build());
                 });
         return ProviderKeySummary.from(cred);
@@ -110,14 +107,14 @@ public class ProviderKeyService {
                             .encryptedKey(encrypted).keyPreview(preview)
                             .build());
                 });
-        return new ProviderKeySummary(cred.getProvider(), cred.getKeyPreview(), cred.getCreatedAt());
+        return new ProviderKeySummary(cred.getProvider(), null, cred.getKeyPreview(), cred.getCreatedAt());
     }
 
     @Transactional(readOnly = true)
     public List<ProviderKeySummary> teamKeys(Long userId, Long teamId) {
         requireMember(teamId, userId);
         return teamProviderCredentialRepository.findByTeamId(teamId).stream()
-                .map(c -> new ProviderKeySummary(c.getProvider(), c.getKeyPreview(), c.getCreatedAt()))
+                .map(c -> new ProviderKeySummary(c.getProvider(), null, c.getKeyPreview(), c.getCreatedAt()))
                 .toList();
     }
 
@@ -152,10 +149,16 @@ public class ProviderKeyService {
         }
     }
 
+    // 프로바이더 이름을 자유 입력으로 허용한다(openai/anthropic 외 kimi 등도 등록 가능).
+    // 단, 실제 프록시 라우팅(ProviderRouter)은 아직 openai/anthropic만 지원하므로 그 외 프로바이더로
+    // 등록한 키는 저장은 되지만 채팅 요청엔 아직 쓰이지 않는다(라우팅 확장은 추후).
     private String normalizeProvider(String provider) {
         String p = provider == null ? "" : provider.trim().toLowerCase();
-        if (!SUPPORTED.contains(p)) {
-            throw ApiException.badRequest("지원하지 않는 프로바이더입니다: " + provider + " (openai, anthropic만 가능)");
+        if (p.isEmpty()) {
+            throw ApiException.badRequest("provider는 필수입니다");
+        }
+        if (p.length() > 50) {
+            throw ApiException.badRequest("provider 이름이 너무 깁니다");
         }
         return p;
     }

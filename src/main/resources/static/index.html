@@ -123,15 +123,19 @@
           채팅 테스트가 "키를 등록하라"며 막혀요. 비용은 각자 본인 OpenAI/Anthropic 계정으로 청구됩니다.
           등록한 키는 암호화되어 저장되고, 이 화면엔 마스킹된 일부만 보입니다(원문은 다시 표시되지 않음).</p>
         <div class="btn-row">
-          <select id="byokProvider" style="max-width:200px">
-            <option value="openai">openai (gpt-*)</option>
-            <option value="anthropic">anthropic (claude-*)</option>
-          </select>
+          <input id="byokProvider" list="providerList" value="openai" placeholder="프로바이더" style="max-width:150px">
+          <datalist id="providerList">
+            <option value="openai"></option>
+            <option value="anthropic"></option>
+          </datalist>
+          <input id="byokLabel" placeholder="별명(선택, 예: 회사 계정)" style="max-width:170px">
           <input id="byokKey" placeholder="sk-... 또는 sk-ant-..." style="flex:1">
           <button class="btn-primary" onclick="registerProviderKey()">등록</button>
         </div>
+        <p class="hint">프로바이더는 자동으로 openai/anthropic이 채워지지만, 직접 수정해 다른 회사(예: kimi)도 등록할 수 있어요.
+          단, 지금 실제 프록시 호출은 openai/anthropic만 지원합니다(다른 프로바이더 라우팅은 추후).</p>
         <table>
-          <thead><tr><th>프로바이더</th><th>키(마스킹)</th><th>등록일</th><th></th></tr></thead>
+          <thead><tr><th>프로바이더</th><th>별명</th><th>키(마스킹)</th><th>등록일</th><th></th></tr></thead>
           <tbody id="byokTable"></tbody>
         </table>
       </div>
@@ -218,7 +222,12 @@
       <div id="teamDetail" class="hidden">
         <div class="card">
           <h2>초대 링크 발급 (OWNER만 가능)</h2>
-          <div class="btn-row"><button class="btn-outline" onclick="createInvite()">새 초대 링크 생성</button></div>
+          <div class="btn-row">
+            <button class="btn-outline" onclick="createInvite()">새 초대 링크 생성</button>
+            <button class="btn-danger" onclick="leaveTeam()">팀 탈퇴</button>
+            <button class="btn-danger" id="disbandBtn" onclick="disbandTeam()" style="display:none">팀 해지 (OWNER)</button>
+          </div>
+          <p class="hint">탈퇴하면 내가 발급한 팀 키가 자동 폐기됩니다. 팀 해지(OWNER)는 팀의 모든 키(팀 tlm_ 키 + 등록한 원문 LLM 키)를 폐기합니다.</p>
           <div id="inviteReveal"></div>
         </div>
 
@@ -229,7 +238,7 @@
             <button class="btn-outline" onclick="setMyNickname()">내 닉네임 설정</button>
           </div>
           <table>
-            <thead><tr><th>이메일</th><th>닉네임</th><th>역할</th><th>합류일</th></tr></thead>
+            <thead><tr><th>이메일</th><th>닉네임</th><th>역할</th><th>합류일</th><th></th></tr></thead>
             <tbody id="membersTable"></tbody>
           </table>
         </div>
@@ -403,20 +412,23 @@ async function loadProviderKeys() {
   document.getElementById('byokTable').innerHTML = r.data.map(k => `
     <tr>
       <td>${k.provider}</td>
+      <td>${escapeHtml(k.label || '-')}</td>
       <td><code>${escapeHtml(k.keyPreview)}</code></td>
       <td>${(k.registeredAt || '').replace('T', ' ').slice(0, 19)}</td>
       <td><button class="btn-danger" onclick="deleteProviderKey('${k.provider}')">삭제</button></td>
-    </tr>`).join('') || '<tr><td colspan="4" style="color:#9ca3af">등록된 LLM 키가 없습니다 - 등록해야 채팅을 쓸 수 있어요</td></tr>';
+    </tr>`).join('') || '<tr><td colspan="5" style="color:#9ca3af">등록된 LLM 키가 없습니다 - 등록해야 채팅을 쓸 수 있어요</td></tr>';
 }
 
 async function registerProviderKey() {
   const provider = document.getElementById('byokProvider').value;
   const apiKey = document.getElementById('byokKey').value.trim();
+  const label = document.getElementById('byokLabel').value.trim();
   if (!apiKey) { toast('키를 입력하세요'); return; }
-  const r = await api('/provider-keys', { method: 'POST', body: { provider, apiKey } });
+  const r = await api('/provider-keys', { method: 'POST', body: { provider, apiKey, label } });
   if (r.status === 201) {
     toast(`${provider} 키를 등록했습니다`);
     document.getElementById('byokKey').value = '';  // 입력창에 원문 안 남기기
+    document.getElementById('byokLabel').value = '';
     loadProviderKeys();
   } else toast('등록 실패: ' + (r.data?.message || r.status));
 }
@@ -538,10 +550,13 @@ async function rateLimitDemo() {
 
 // ---- 팀 API 관리 (add-on) ----
 let currentTeamId = null;
+let myTeamsData = [];
+let currentTeamRole = null;
 
 async function loadMyTeams() {
   const r = await api('/teams/mine');
   if (r.status !== 200) return;
+  myTeamsData = r.data;
   const sel = document.getElementById('teamSelect');
   const keepId = currentTeamId;
   sel.innerHTML = r.data.map(t => `<option value="${t.teamId}">${escapeHtml(t.name)} (${t.role})</option>`).join('')
@@ -557,6 +572,8 @@ function onTeamSelect() {
   currentTeamId = val ? Number(val) : null;
   document.getElementById('teamDetail').classList.toggle('hidden', !currentTeamId);
   if (!currentTeamId) return;
+  currentTeamRole = (myTeamsData.find(t => t.teamId === currentTeamId) || {}).role;
+  document.getElementById('disbandBtn').style.display = currentTeamRole === 'OWNER' ? '' : 'none';
   document.getElementById('inviteReveal').innerHTML = '';
   document.getElementById('teamKeyReveal').innerHTML = '';
   loadMembers();
@@ -651,13 +668,17 @@ async function createInvite() {
 async function loadMembers() {
   const r = await api(`/teams/${currentTeamId}/members`);
   if (r.status !== 200) return;
-  document.getElementById('membersTable').innerHTML = r.data.map(m => `
+  document.getElementById('membersTable').innerHTML = r.data.map(m => {
+    // OWNER이고, 대상이 본인이 아니면 강제퇴장 버튼 표시
+    const canKick = currentTeamRole === 'OWNER' && m.email !== email;
+    return `
     <tr>
       <td>${escapeHtml(m.email)}</td>
       <td>${escapeHtml(m.nickname || '-')}</td>
       <td><span class="badge ${m.role === 'OWNER' ? 'badge-ok' : 'badge-off'}">${m.role}</span></td>
       <td>${(m.joinedAt || '').replace('T', ' ').slice(0, 19)}</td>
-    </tr>`).join('');
+      <td>${canKick ? `<button class="btn-danger" onclick="removeMember(${m.userId}, '${escapeHtml(m.email)}')">강제퇴장</button>` : ''}</td>
+    </tr>`; }).join('');
 }
 
 async function setMyNickname() {
@@ -666,6 +687,30 @@ async function setMyNickname() {
   const r = await api(`/teams/${currentTeamId}/members/me/nickname`, { method: 'PATCH', body: { nickname } });
   if (r.status === 204) { toast('닉네임을 설정했습니다'); loadMembers(); loadTeamMemberUsage(); }
   else toast('설정 실패: ' + (r.data?.message || r.status));
+}
+
+async function leaveTeam() {
+  if (!currentTeamId) return;
+  if (!confirm('이 팀에서 탈퇴할까요? 내가 발급한 팀 키가 폐기됩니다.')) return;
+  const r = await api(`/teams/${currentTeamId}/members/me`, { method: 'DELETE' });
+  if (r.status === 204) { toast('팀에서 탈퇴했습니다'); currentTeamId = null; await loadMyTeams(); }
+  else toast('탈퇴 실패: ' + (r.data?.message || r.status));
+}
+
+async function disbandTeam() {
+  if (!currentTeamId) return;
+  if (!confirm('팀을 해지할까요? 팀의 모든 키(팀 tlm_ 키 + 등록한 원문 LLM 키)가 폐기됩니다. 되돌릴 수 없습니다.')) return;
+  const r = await api(`/teams/${currentTeamId}`, { method: 'DELETE' });
+  if (r.status === 204) { toast('팀을 해지했습니다'); currentTeamId = null; await loadMyTeams(); }
+  else toast('해지 실패: ' + (r.data?.message || r.status));
+}
+
+async function removeMember(targetUserId, targetEmail) {
+  if (!currentTeamId) return;
+  if (!confirm(`${targetEmail} 님을 강제퇴장할까요? 그 사람이 발급한 팀 키가 폐기됩니다.`)) return;
+  const r = await api(`/teams/${currentTeamId}/members/${targetUserId}`, { method: 'DELETE' });
+  if (r.status === 204) { toast('강제퇴장 완료'); loadMembers(); loadTeamMemberUsage(); }
+  else toast('강제퇴장 실패: ' + (r.data?.message || r.status));
 }
 
 async function loadTeamUsage() {

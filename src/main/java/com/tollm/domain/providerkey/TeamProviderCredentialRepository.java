@@ -10,4 +10,6 @@ public interface TeamProviderCredentialRepository extends JpaRepository<TeamProv
     Optional<TeamProviderCredential> findByTeamIdAndProvider(Long teamId, String provider);
 
     List<TeamProviderCredential> findByTeamId(Long teamId);
+
+    void deleteByTeamId(Long teamId); // 팀 해지 시 원문 키(암호문) 일괄 삭제
 }

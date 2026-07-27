@@ -1,13 +1,18 @@
 package com.tollm.domain.team;
 
+import com.tollm.domain.apikey.ApiKey;
+import com.tollm.domain.apikey.ApiKeyRepository;
+import com.tollm.domain.providerkey.TeamProviderCredentialRepository;
 import com.tollm.domain.team.dto.*;
 import com.tollm.domain.usage.RequestLogRepository;
 import com.tollm.domain.usage.dto.TeamMemberUsageRow;
 import com.tollm.domain.usage.dto.TeamUsageSummaryResponse;
 import com.tollm.domain.user.User;
 import com.tollm.domain.user.UserRepository;
+import com.tollm.global.config.CacheConfig;
 import com.tollm.global.error.ApiException;
 import lombok.RequiredArgsConstructor;
+import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -32,6 +37,9 @@ public class TeamService {
     private final TeamUsageQuotaRepository teamUsageQuotaRepository;
     private final RequestLogRepository requestLogRepository;
     private final UserRepository userRepository;
+    // 탈퇴/강제퇴장/해지 시 연쇄 폐기용
+    private final ApiKeyRepository apiKeyRepository;
+    private final TeamProviderCredentialRepository teamProviderCredentialRepository;
 
     private static final SecureRandom RANDOM = new SecureRandom();
     private static final int INVITE_VALID_DAYS = 7;
@@ -152,6 +160,48 @@ public class TeamService {
                     row != null ? row.totalTokens() : 0L,
                     row != null ? row.requestCount() : 0L);
         }).toList();
+    }
+
+    // 본인 탈퇴: 멤버가 팀에서 나간다. 나가면 그 사람이 발급한 팀 tlm_ 키는 자동 폐기(더는 그 사람
+    // 명의로 팀 자원을 못 쓰게). OWNER는 그냥 나갈 수 없다(팀을 해지하거나 넘겨야) - 팀이 주인 없이
+    // 남는 걸 막기 위함. 인증 캐시(API_KEY_AUTH)를 비워 폐기가 즉시 반영되게 한다.
+    @Transactional
+    @CacheEvict(cacheNames = CacheConfig.API_KEY_AUTH, allEntries = true)
+    public void leaveTeam(Long userId, Long teamId) {
+        TeamMember me = requireMember(teamId, userId);
+        if (me.getTeamRole() == TeamMember.TeamRole.OWNER) {
+            throw ApiException.badRequest("OWNER는 팀을 해지하거나 다른 멤버에게 넘긴 뒤 나갈 수 있습니다");
+        }
+        apiKeyRepository.findByTeamIdAndUserId(teamId, userId).forEach(ApiKey::revoke);
+        teamMemberRepository.delete(me);
+    }
+
+    // 강제퇴장: OWNER가 다른 멤버를 내보낸다. 내보낸 멤버가 발급한 팀 키도 자동 폐기.
+    @Transactional
+    @CacheEvict(cacheNames = CacheConfig.API_KEY_AUTH, allEntries = true)
+    public void removeMember(Long ownerUserId, Long teamId, Long targetUserId) {
+        requireOwner(teamId, ownerUserId);
+        if (targetUserId.equals(ownerUserId)) {
+            throw ApiException.badRequest("본인은 강제퇴장 대상이 아닙니다 (탈퇴 또는 팀 해지를 사용하세요)");
+        }
+        TeamMember target = teamMemberRepository.findByTeamIdAndUserId(teamId, targetUserId)
+                .orElseThrow(() -> ApiException.notFound("해당 팀원을 찾을 수 없습니다"));
+        apiKeyRepository.findByTeamIdAndUserId(teamId, targetUserId).forEach(ApiKey::revoke);
+        teamMemberRepository.delete(target);
+    }
+
+    // 팀 해지: OWNER가 팀을 없앤다. 팀의 모든 tlm_ 키 폐기 + 원문 BYOK 키(암호문) 삭제 + 초대/쿼터/멤버 정리.
+    // team 행 자체는 request_log/api_key가 FK로 참조하므로 지우지 않는다(이력 보존). 멤버가 0이 되면
+    // 어느 사용자의 /teams/mine에도 안 나오고, 남은 키는 전부 폐기되어 사실상 사라진 것과 같다.
+    @Transactional
+    @CacheEvict(cacheNames = CacheConfig.API_KEY_AUTH, allEntries = true)
+    public void disbandTeam(Long userId, Long teamId) {
+        requireOwner(teamId, userId);
+        apiKeyRepository.findByTeamId(teamId).forEach(ApiKey::revoke);       // 톨름 팀 키 전부 폐기
+        teamProviderCredentialRepository.deleteByTeamId(teamId);            // 원문 프로바이더 키 삭제
+        teamInviteRepository.deleteByTeamId(teamId);
+        teamUsageQuotaRepository.findByTeamId(teamId).ifPresent(teamUsageQuotaRepository::delete);
+        teamMemberRepository.deleteByTeamId(teamId);
     }
 
     private TeamMember requireMember(Long teamId, Long userId) {

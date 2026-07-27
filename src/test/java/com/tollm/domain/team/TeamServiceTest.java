@@ -37,6 +37,8 @@ class TeamServiceTest {
     @Mock private TeamUsageQuotaRepository teamUsageQuotaRepository;
     @Mock private RequestLogRepository requestLogRepository;
     @Mock private UserRepository userRepository;
+    @Mock private com.tollm.domain.apikey.ApiKeyRepository apiKeyRepository;
+    @Mock private com.tollm.domain.providerkey.TeamProviderCredentialRepository teamProviderCredentialRepository;
 
     private TeamService teamService;
 
@@ -46,7 +48,8 @@ class TeamServiceTest {
     @BeforeEach
     void setUp() {
         teamService = new TeamService(teamRepository, teamMemberRepository, teamInviteRepository,
-                teamUsageQuotaRepository, requestLogRepository, userRepository);
+                teamUsageQuotaRepository, requestLogRepository, userRepository,
+                apiKeyRepository, teamProviderCredentialRepository);
     }
 
     private User user() {

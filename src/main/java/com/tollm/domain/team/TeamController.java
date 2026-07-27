@@ -86,6 +86,28 @@ public class TeamController {
         teamService.setMyNickname(userId, teamId, request.nickname());
     }
 
+    // 본인 탈퇴 (탈퇴하면 본인이 발급한 팀 키 자동 폐기)
+    @DeleteMapping("/{teamId}/members/me")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void leaveTeam(@RequestAttribute("userId") Long userId, @PathVariable Long teamId) {
+        teamService.leaveTeam(userId, teamId);
+    }
+
+    // 강제퇴장 (OWNER만, 대상 멤버가 발급한 팀 키 자동 폐기)
+    @DeleteMapping("/{teamId}/members/{targetUserId}")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void removeMember(@RequestAttribute("userId") Long userId, @PathVariable Long teamId,
+                             @PathVariable Long targetUserId) {
+        teamService.removeMember(userId, teamId, targetUserId);
+    }
+
+    // 팀 해지 (OWNER만, 팀의 모든 tlm_ 키 폐기 + 원문 BYOK 키 삭제)
+    @DeleteMapping("/{teamId}")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void disbandTeam(@RequestAttribute("userId") Long userId, @PathVariable Long teamId) {
+        teamService.disbandTeam(userId, teamId);
+    }
+
     // ---- 팀 API 키 ----
     // 발급/조회/폐기 로직 자체는 ApiKeyService(팀 멤버십 검증 포함)에 위임 -
     // 이 컨트롤러는 URL 라우팅만 담당한다 (개인 키 ApiKeyController와 같은 얇은 컨트롤러 원칙)

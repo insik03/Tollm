@@ -22,7 +22,7 @@ public class ProviderKeyController {
     @ResponseStatus(HttpStatus.CREATED)
     public ProviderKeySummary register(@RequestAttribute("userId") Long userId,
                                        @Valid @RequestBody ProviderKeyRegisterRequest request) {
-        return providerKeyService.register(userId, request.provider(), request.apiKey());
+        return providerKeyService.register(userId, request.provider(), request.apiKey(), request.label());
     }
 
     @GetMapping

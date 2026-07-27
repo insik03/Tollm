@@ -6,4 +6,5 @@ import java.util.Optional;
 
 public interface TeamInviteRepository extends JpaRepository<TeamInvite, Long> {
     Optional<TeamInvite> findByToken(String token);
+    void deleteByTeamId(Long teamId); // 팀 해지 시 초대 토큰 정리
 }

@@ -10,4 +10,6 @@ public interface TeamMemberRepository extends JpaRepository<TeamMember, Long> {
     List<TeamMember> findByTeamId(Long teamId);
     List<TeamMember> findByUserId(Long userId);
     boolean existsByTeamIdAndUserId(Long teamId, Long userId);
+    void deleteByTeamId(Long teamId);          // 팀 해지 시 멤버 일괄 제거
+    long countByTeamId(Long teamId);           // OWNER 단독 여부 등 판단용
 }

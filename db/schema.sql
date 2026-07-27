@@ -213,6 +213,7 @@ create table provider_credential (
     provider varchar(255) not null,
     encrypted_key varchar(1024) not null,
     key_preview varchar(255) not null,
+    label varchar(255),
     created_at datetime(6) not null,
     primary key (id)
 ) engine=InnoDB;
