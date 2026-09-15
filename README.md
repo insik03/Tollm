@@ -1,76 +1,64 @@
 # Tollm — 팀을 위한 AI(LLM) API 게이트웨이
 
-> Toll(통행료) + LLM. 모든 AI 요청이 통과하며 인증·과금·제한이 이루어지는 관문
+> Toll(통행료) + LLM. 모든 AI 요청이 통과하며 인증·과금·제한이 이루어지는 관문.
 
-## 요청 처리 흐름
+여러 LLM 프로바이더(OpenAI 호환 형식·Anthropic)를 하나의 엔드포인트로 묶고, 인증·레이트리밋·쿼터·캐시·사용량 집계까지 처리하는 Spring Boot 게이트웨이입니다. BCSD 회고 프로젝트로 2주간(2026.07.14~07.28) 혼자 설계·구현했습니다.
 
-클라이언트 → [1.인증 필터] → [2.레이트 리밋·쿼터] → [3.캐시 확인] → [4.프로바이더 라우팅] → 외부 LLM API → [5.로깅·비용 집계] → 응답
+**[Live Demo](http://15.164.215.213/)** · Java 21 · Spring Boot 3.3.5 · MySQL · Redis
+
+## 구조
+
+![Tollm architecture](docs/architecture.svg)
+
+## 핵심 설계
+
+- **BYOK (Bring Your Own Key)** — 서버는 프로바이더 API 키를 보관하지 않습니다. 사용자/팀이 각자 등록한 키를 AES-GCM으로 암호화해 저장하고, 요청마다 복호화해 씁니다. 서버 공용 키로의 폴백은 없습니다.
+- **Redis Lua 토큰버킷** — 레이트리밋의 "조회 → 계산 → 차감"을 단일 원자 연산으로 묶어, 여러 인스턴스·동시 요청에서도 레이스 컨디션 없이 정확한 한도를 지킵니다.
+- **개인 흐름 위의 Add-on** — 팀 기능(쿼터, 캐시, 사용량 집계)은 검증된 개인 사용자 로직에 nullable `team` 컬럼만 얹어 구현했습니다. 개인 키는 항상 `team = null`이라 기존 로직·기존 테스트가 한 줄도 바뀌지 않습니다.
+- **응답 캐시** — 요청 본문을 정규화한 뒤 SHA-256으로 캐시 키를 만들어, 형식만 다른 동일 요청의 캐시 미스를 막습니다.
+
+## 로컬 실행
+
+```bash
+# MySQL 8: tollm 스키마 생성, Redis: docker run -p 6379:6379 redis
+cp deploy/tollm.env.example .env   # 채운 뒤
+./gradlew bootRun
+```
+
+필수 환경변수: `JWT_SECRET`, `BYOK_ENCRYPTION_KEY`(32자 이상, 한 번 정하면 변경 금지 — 이미 등록된 키를 복호화 못 하게 됨), `DB_*`, `REDIS_HOST`. 값이 비어 있으면 prod 프로파일은 부팅 자체를 실패시킵니다(fail-fast).
+
+## 배포 (EC2)
+
+1. `mysql -u <user> -p tollm < db/schema.sql` — prod는 `ddl-auto=validate`라 스키마 선적용이 먼저입니다.
+2. `deploy/tollm.env.example`을 `/etc/tollm/tollm.env`로 복사해 값 채우고 `chmod 600`.
+3. `SPRING_PROFILES_ACTIVE=prod`로 기동 → `curl localhost:8080/actuator/health`로 확인.
+4. Nginx 리버스 프록시, `proxy_read_timeout`을 앱 read timeout(60s)보다 크게(75s 등).
 
 ## 패키지 구조
 
 ```
 com.tollm
 ├── domain
-│   ├── user      # 회원, 인증 (JWT)
-│   ├── team      # 팀, 팀원, 초대 링크, 팀 전용 쿼터/API 키 (add-on)
-│   ├── apikey    # 게이트웨이 키 발급/관리
-│   ├── provider  # LLM 제공사, 모델 단가
-│   ├── proxy     # 프록시 핵심: 레이트리밋, 캐시, 라우팅
-│   ├── usage     # 요청 로그, 쿼터, 사용량 조회
-│   └── admin     # 관리자 통계
+│   ├── user        # 회원, 인증 (JWT)
+│   ├── team        # 팀, 팀원, 초대 링크
+│   ├── apikey      # 게이트웨이 키 발급/관리
+│   ├── provider    # LLM 프로바이더, 모델 단가
+│   ├── providerkey # BYOK — 개인/팀별 프로바이더 키 암호화 저장
+│   ├── proxy       # 프록시 핵심: 레이트리밋, 캐시, 라우팅
+│   ├── usage       # 요청 로그, 쿼터, 사용량 조회 (user/team/apiKey 3축)
+│   └── admin       # 관리자 통계
 └── global
-    ├── auth      # JwtProvider, 인증 필터 2종
-    ├── config    # Redis, RestClient 설정
-    ├── logging   # AOP 요청 로깅
-    └── error     # 공통 예외 처리
+    ├── auth        # JwtProvider, CryptoService(AES-GCM), 인증 필터 2종
+    ├── config      # Redis, RestClient 설정
+    ├── logging     # AOP 요청 로깅
+    └── error       # 공통 예외 처리
 ```
 
-## 구현 순서 (TODO 태그 기준)
+## 검증
 
-1. **[1주차 후반~2주차 초]** AuthController/Service → JwtProvider → ApiKey 발급 → ApiKeyAuthFilter → ProxyController(RestClient 호출) → RequestLog 저장
-2. **[2주차]** RateLimitService(Redis 토큰 버킷+Lua) → UsageQuota 차단 → ResponseCacheService → 집계 API
-3. **[3주차]** EC2+Nginx 배포 → k6 부하 테스트 → 인덱스/캐시 개선 수치 기록
+- 단위·통합 테스트 86개
+- 배포 전 재검수에서 잡은 항목 — URL 인코딩으로 인증 필터를 우회해 관리자 API에 접근 가능했던 문제, `stream:true` 요청이 쿼터를 우회하던 문제, 커넥션 풀 없는 HTTP 클라이언트가 프로바이더 지연 시 톰캣 스레드 풀을 고갈시키던 문제. 상세는 [엔지니어링 결정 기록](docs/DECISIONS.md) 참고.
 
-## 로컬 실행 준비
+## 라이선스
 
-- MySQL 8: `tollm` 스키마 생성
-- Redis: `docker run -p 6379:6379 redis` 또는 로컬 설치
-- 환경변수: `OPENAI_API_KEY` 또는 `ANTHROPIC_API_KEY`, `JWT_SECRET`
-
-## 기술 선정 근거 (발표/면접 대비 - 채워나갈 것)
-
-- 왜 Java 21? → 로컬에 JDK 21이 이미 설치돼 있고, Spring Boot 3.3이 공식 지원하는 최신 LTS. JDK 17을 추가 설치해 두 버전을 관리할 이유가 없음
-- 왜 Redis로 레이트 리밋? → 레이트리밋은 여러 톰캣 스레드(향후엔 여러 서버 인스턴스)가 "같은 사용자의 남은 토큰 수"라는 하나의 값을 동시에 읽고 쓰는 전형적인 공유 상태 문제다. 애플리케이션 메모리(예: `ConcurrentHashMap`)에 두면 인스턴스를 2대 이상으로 늘리는 순간 사용자별 한도가 인스턴스 수만큼 쪼개져 버린다(사용자가 어느 인스턴스로 라우팅되느냐에 따라 다른 버킷을 보게 됨). Redis는 모든 인스턴스가 공유하는 단일 저장소이면서, Lua 스크립트를 단일 명령처럼 원자적으로 실행해주므로 "값 읽기 → 계산 → 쓰기"를 한 번에 처리할 수 있어 레이스 컨디션 문제까지 같이 해결된다.
-- 왜 토큰 버킷? (고정 윈도우의 문제점) → 고정 윈도우("1분마다 카운터 리셋") 방식은 경계 부근에서 허용치를 2배까지 봐줄 수 있다는 문제가 있다. 예를 들어 창구가 00~59초일 때 59초에 10건, 다음 창구 00초에 다시 10건을 보내면 실제로는 2초 사이에 20건이 통과한다("burst" 문제). 토큰 버킷은 리셋 시점이라는 개념 자체가 없이 "초당 refillPerSec개씩 꾸준히 채워지는 그릇"으로 모델링하므로 이런 경계 폭주가 생기지 않고, 평상시엔 여유 토큰(`capacity`)으로 짧은 버스트 트래픽도 자연스럽게 흡수한다는 장점도 있다.
-- 왜 키를 해시로 저장? → DB가 유출돼도 키 원문이 없다. 발급 응답에서 딱 1회만 원문 노출
-- 왜 비밀번호는 bcrypt인데 API 키는 SHA-256? → 해싱은 입력 엔트로피와 검증 빈도로 결정. 비밀번호는 저엔트로피(사람이 만듦)·저빈도라 느린 bcrypt로 무차별 대입 방어, API 키는 256비트 랜덤(추측 불가)·매 요청 검증이라 빠른 SHA-256 + 결정적 해시 덕분에 유니크 인덱스 단건 조회 가능
-- 왜 OpenAI 호환 API 형식? → 기존 도구/SDK가 base URL만 바꿔 그대로 사용 가능. 프로바이더별 형식 차이는 어댑터(AnthropicClient)가 내부에서 흡수
-- 왜 RestClient 타임아웃 필수? → 외부 LLM API가 응답을 안 주면 톰캣 스레드가 하나씩 물려 스레드 풀 고갈 → 서버 전체 마비. connect 3s / read 60s로 차단
-- 왜 application.yml을 local/prod 프로파일로 분리? → 환경마다 달라야 하는 값(DB 접속, ddl-auto)이 한 파일에 있으면 "배포 전에 바꿔야지"라는 사람의 기억에 의존하게 된다. 프로파일로 분리하면 구조가 강제한다: 로컬은 편의 기본값 + ddl-auto=update, 운영(prod)은 모든 민감 값이 기본값 없는 환경변수(미설정 시 부팅 실패, SEC-01과 같은 fail-fast 원칙) + ddl-auto=validate(운영 스키마는 JPA가 아닌 사람이 검토한 DDL로만 변경)
-- 왜 최소 웹 대시보드를 별도 프레임워크 없이(정적 HTML+바닐라 JS) 만들었나? → Tollm은 "AI를 기능으로 붙인 웹"이 아니라 백엔드 인프라이므로 UI가 필수는 아니지만, 발표·면접에서 링크 하나로 동작을 시연하려면 최소 진입점이 필요했다. React 등 빌드 도구를 들이면 배포 파이프라인이 늘고(별도 정적 호스팅 또는 빌드 스텝), 이 프로젝트의 학습 스코프(백엔드)를 벗어난다. src/main/resources/static/에 두면 Spring Boot가 같은 포트에서 그대로 서빙해 인프라 추가가 0이다. 원래 계획서에도 "관리 대시보드(프론트는 AI로 빠르게)"로 명시돼 있던 항목
-- 레이트리밋 데모에서 배운 것: 순차 호출로는 429가 재현되지 않는다 → 토큰 버킷은 "경과 시간만큼 계속 리필"되므로(token_bucket.lua), 요청을 하나씩 기다리며 보내면 요청 사이 지연 동안 토큰이 다시 채워져 버킷이 고갈되지 않는다. capacity=10을 실제로 초과시키려면 Promise.all로 동시에 쏴야 한다 — 이 프로젝트에서 "레이트리밋이 막아야 할 상황"이 정확히 무엇인지(순차적 저빈도 요청이 아니라 짧은 시간의 동시 폭주) 다시 확인한 계기
-- 왜 팀 API 키를 "재설계"가 아니라 "추가(add-on)"로 넣었나? → 개인 사용자 흐름(인증/키/쿼터/레이트리밋/캐시)은 이미 검증된 코드라 손대는 순간 회귀 위험이 생긴다. 그래서 ApiKey·RequestLog에 nullable `team` 컬럼만 추가하고(개인 키는 항상 null, 기존 로직 100% 무손상), UsageQuota·RateLimitService·ResponseCacheService의 검증된 패턴(원자적 bulk update, Redis Lua, SHA-256 캐시 키)을 팀 단위로 그대로 복제했다 - `relay(userId, body)`는 내부적으로 `relay(userId, null, body)`를 호출할 뿐이라 기존 테스트가 한 줄도 안 바뀐다
-- 팀 캐시는 왜 사용자 캐시와 다르게 "공유"를 택했나? → 개인 캐시는 userId를 키에 포함해 크로스오버를 막는 게 원칙(위 항목 참고)이지만, 팀은 애초에 여러 사람이 "같은 자원을 공유"하려고 만든 경계다. 팀원끼리 같은 질문을 반복하면 캐시를 공유해 비용을 아끼는 쪽이 팀의 목적에 맞다고 판단했다 - `buildKeyForTeam`은 "team:{id}"로 네임스페이스만 분리해 개인 캐시와는 절대 충돌하지 않는다
-- 초대 링크를 왜 1회용 토큰이 아니라 디스코드식 재사용 링크로 만들었나? → "링크 하나를 여러 팀원에게 공유"하는 게 초대의 자연스러운 사용 방식이다. 만료(7일) 전까지는 여러 번 눌러도 안전하도록(멱등) 이미 멤버면 에러 대신 조용히 통과시켰다 - 재시도가 실패로 보이면 사용자가 혼란스럽다
-- 팀 키 사용량이 개인 집계(`/usage/me`)에 새던 버그를 어떻게 잡았나? → `RequestLog.user`는 팀 키로 보낸 요청에서도 항상 "발급한 사람"으로 채워지므로, `aggregateByUser` 쿼리에 `l.team IS NULL` 조건이 없으면 팀에서 쓴 사용량까지 그 사람의 개인 합계에 합쳐진다. 실제로 팀 기능을 써보다가 개인 사용량 숫자가 팀 사용분만큼 부풀어 있는 걸 보고 발견한 버그다 - "내가 개인 키로 쓴 건지 팀 키로 쓴 건지 구분이 안 된다"는 피드백이 계기였다. 회귀 방지용 테스트(`팀_키_사용량은_본인의_개인_집계에_섞이지_않는다`)를 먼저 추가해 버그를 재현시킨 뒤 조건을 고쳤다
-- 왜 API 키 단위 사용량을 별도로 추가했나(팀 집계와 별개로)? → 같은 사람이 개인 키를 여러 개 발급받으면(또는 여러 팀 키를 쓰면) 기존엔 "그 사람"·"그 팀" 단위로만 합산돼, 어느 키가 얼마나 썼는지 구분할 방법이 없었다. `RequestLog`에 nullable `apiKey` FK 하나만 추가하고(팀 컬럼을 add-on으로 넣었을 때와 같은 이유로, 기존 `user`/`team` 집계 로직은 그대로 둔 채 새 집계 쿼리(`aggregateByApiKey`)만 얹었다) `GET /keys/{id}/usage`, `GET /teams/{id}/keys/{id}/usage`로 노출했다. 기존의 "총합" 뷰(`/usage/me`, `/teams/{id}/usage`)는 "지금까지 쓴 전체 비용이 얼마인지"를 보는 데 여전히 유용하므로 없애지 않고 병행했다 - 세분화된 값과 합산된 값은 서로 다른 질문에 답하므로 대체가 아니라 추가 관계다
-
-### 배포 전 재검수(AI 재검수)에서 잡아 고친 항목
-
-- (SEC-04) URL 인코딩으로 관리자 인증을 우회할 수 있던 문제 → 두 인증 필터(JwtAuthFilter/ApiKeyAuthFilter)가 `request.getRequestURI()`(퍼센트 인코딩 원문)로 보호 경로를 판정했는데, Spring MVC는 **디코딩된** 경로로 컨트롤러를 매핑한다. 그래서 `GET /%61dmin/usage`(`%61`='a')는 필터의 `/admin` 접두어 매칭을 피해 필터를 통째로 건너뛰면서 AdminController에는 그대로 라우팅돼, 토큰 없이 전체 사용량 조회·타 사용자 쿼터 조작이 가능했다. Spring이 매핑에 쓰는 것과 같은 `UrlPathHelper.getPathWithinApplication()`(디코딩·정규화)으로 판정을 바꿔 필터와 컨트롤러가 항상 같은 경로를 보게 했다. 실서버 curl로 `/%61dmin`이 401로 막히는 것 확인
-- (SEC-04) `stream:true`로 월 쿼터를 무제한 우회할 수 있던 문제 → 스트리밍 응답은 SSE 텍스트라 토큰 파서가 못 읽어 비용이 0으로 기록되고, 실제 프로바이더 비용은 발생했는데 쿼터에는 반영되지 않았다(SEC-03과 같은 "과금 미보장 요청 통과" 계열). 스트리밍은 지원 대상이 아니므로 외부 호출 전에 400으로 거부한다
-- 캐시 키를 model+messages 일부가 아니라 **정규화된 요청 본문 전체**로 바꿈 → 예전엔 `content`를 `asText()`로만 읽어 OpenAI 표준 배열 형식(`[{"type":"text",...}]`)의 서로 다른 질문이 같은 키로 충돌하거나(남의 답이 나감), `max_tokens`/`temperature`가 달라도 같은 캐시를 받는(잘린 응답을 받는) 오응답이 있었다. "조금이라도 다른 요청은 다른 키" 원칙으로 바꿔 잘못된 히트를 원천 차단했다(공백만 다른 요청이 미스가 되는 건 "안전한 미스"라 수용)
-- 외부 LLM 호출을 커넥션 풀 있는 `JdkClientHttpRequestFactory`로 교체 + `/v1` 동시 호출 격벽(Semaphore) 도입 → 예전 `SimpleClientHttpRequestFactory`는 풀이 없어 동시 요청이 늘면 매번 TCP+TLS 핸드셰이크를 새로 했고, 블로킹 호출이 톰캣 스레드(기본 200)를 최대 60초씩 물어 프로바이더가 느려지면 로그인·대시보드까지 먹통이 됐다. 동시 외부 호출을 100으로 제한하고 초과분은 즉시 503으로 되돌려(스레드를 붙잡지 않음) 프록시가 포화돼도 다른 요청은 살아있게 했다
-- 매 `/v1` 요청의 API 키 조회·단가표 조회를 Caffeine 캐시로 감쌈 → 둘 다 준정적 데이터라 캐시 히트 경로조차 DB를 4번 왕복하던 걸 줄였다. 키 인증 캐시는 폐기 반영 지연을 최소화하려고 TTL 30초 + 폐기 시 `@CacheEvict`로 즉시 무효화(실서버에서 폐기 직후 401 확인). 키 조회 결과는 엔티티가 아니라 식별자만 담은 record(`ApiKeyPrincipal`)로 캐시해 세션 종료 후 지연 로딩 문제를 피했다
-- prod fail-fast 강화 + 헬스체크 추가 → 프로바이더 키(`OPENAI_API_KEY`/`ANTHROPIC_API_KEY`)를 prod에서 기본값 없는 환경변수로 바꿔(누락 시 부팅 실패) "키 없이 떠서 모든 프록시가 401 나는 조용한 장애"를 막고, `spring-boot-starter-actuator`로 `/actuator/health`를 열어 배포·Nginx 헬스체크가 가능하게 했다(prod는 health만 노출)
-- (운영 배포 blocker) prod는 `ddl-auto=validate`라 스키마가 없으면 부팅이 실패하는데 저장소에 DDL이 없었다 → 엔티티 메타데이터에서 MySQL DDL을 뽑아 [db/schema.sql](db/schema.sql)로 커밋하고, 배포 절차에 "DDL 선적용 후 기동"을 명시했다(아래)
-
-## 배포 절차 (prod, EC2)
-
-1. 운영 MySQL에 `tollm` 데이터베이스 생성 (최소 권한 전용 계정 사용, root 금지)
-2. 스키마 적용: `mysql -u <user> -p tollm < db/schema.sql` (prod는 `validate`라 이 단계가 선행되어야 부팅 성공)
-3. 아래 환경변수 설정 후 `SPRING_PROFILES_ACTIVE=prod`로 기동 (하나라도 빠지면 fail-fast로 부팅 실패)
-   - 필수: `SPRING_PROFILES_ACTIVE=prod`, `DB_URL`, `DB_USERNAME`, `DB_PASSWORD`, `REDIS_HOST`, `JWT_SECRET`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`
-   - 선택: `REDIS_PORT`(기본 6379)
-4. 기동 확인: `curl http://localhost:8080/actuator/health` → `{"status":"UP"}`
-5. Nginx는 앱(8080) 앞단 리버스 프록시로 두고, `proxy_read_timeout`을 앱 read timeout(60초)보다 크게(예: 75초) 잡는다
+개인 프로젝트, 별도 라이선스 명시 없음.
